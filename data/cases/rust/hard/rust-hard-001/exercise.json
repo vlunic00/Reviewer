@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "rust-hard-001",
+  "revision": 1,
+  "language": "rust",
+  "difficulty": "hard",
+  "title": "Relax the publication flag",
+  "description": "A concurrency change weakens the ordering used to publish a value.",
+  "commitMessage": "Use relaxed ordering for the slot readiness flag.",
+  "reviewContext": "A PublishSlot has one producer and one consumer, and publish is called exactly once with a positive value. After read observes readiness, it must return the published value, never the initial zero. The value store remains Relaxed.",
+  "files": [
+    {
+      "path": "src/slot.rs",
+      "status": "modified",
+      "before": "use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};\n\npub struct PublishSlot {\n    value: AtomicUsize,\n    ready: AtomicBool,\n}\n\nimpl PublishSlot {\n    pub fn new() -> Self {\n        Self { value: AtomicUsize::new(0), ready: AtomicBool::new(false) }\n    }\n\n    pub fn publish(&self, value: usize) {\n        self.value.store(value, Ordering::Relaxed);\n        self.ready.store(true, Ordering::Release);\n    }\n\n    pub fn read(&self) -> Option<usize> {\n        if self.ready.load(Ordering::Acquire) {\n            Some(self.value.load(Ordering::Relaxed))\n        } else {\n            None\n        }\n    }\n}\n",
+      "after": "use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};\n\npub struct PublishSlot {\n    value: AtomicUsize,\n    ready: AtomicBool,\n}\n\nimpl PublishSlot {\n    pub fn new() -> Self {\n        Self { value: AtomicUsize::new(0), ready: AtomicBool::new(false) }\n    }\n\n    pub fn publish(&self, value: usize) {\n        self.value.store(value, Ordering::Relaxed);\n        self.ready.store(true, Ordering::Relaxed);\n    }\n\n    pub fn read(&self) -> Option<usize> {\n        if self.ready.load(Ordering::Acquire) {\n            Some(self.value.load(Ordering::Relaxed))\n        } else {\n            None\n        }\n    }\n}\n"
+    },
+    {
+      "path": "src/consumer.rs",
+      "status": "unchanged",
+      "before": "use crate::slot::PublishSlot;\n\npub fn poll(slot: &PublishSlot) -> Option<usize> {\n    slot.read()\n}\n",
+      "after": "use crate::slot::PublishSlot;\n\npub fn poll(slot: &PublishSlot) -> Option<usize> {\n    slot.read()\n}\n"
+    }
+  ],
+  "tags": [
+    "concurrency",
+    "atomics"
+  ]
+}

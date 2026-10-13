@@ -1,0 +1,78 @@
+{
+  "exerciseId": "py-medium-001",
+  "revision": 1,
+  "issues": [
+    {
+      "id": "issue-001",
+      "title": "Logging consumes the iterator",
+      "category": "correctness",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "app/refresh.py",
+          "side": "new",
+          "startLine": 9,
+          "endLine": 9
+        },
+        {
+          "filePath": "app/refresh.py",
+          "side": "new",
+          "startLine": 13,
+          "endLine": 13
+        }
+      ],
+      "summary": "Counting rows exhausts the one-shot iterator before building the snapshot.",
+      "whyItMatters": "A successful nonempty refresh saves and returns an empty list, replacing previously saved data.",
+      "acceptableExplanations": [
+        "sum exhausts the generator before list(rows).",
+        "The fetched iterator can only be traversed once.",
+        "Materialize the rows once before counting and saving."
+      ],
+      "keyConcepts": [
+        "one-shot iterator",
+        "exhaustion",
+        "data loss"
+      ],
+      "commonConfusions": [
+        "An iterator is not a reusable list."
+      ],
+      "suggestedFix": "Materialize once, log len(snapshot), and save and return that same snapshot."
+    },
+    {
+      "id": "issue-002",
+      "title": "Connection failures appear successful",
+      "category": "error handling",
+      "severity": "medium",
+      "locations": [
+        {
+          "filePath": "app/refresh.py",
+          "side": "old",
+          "startLine": 11,
+          "endLine": 11
+        },
+        {
+          "filePath": "app/refresh.py",
+          "side": "new",
+          "startLine": 12,
+          "endLine": 12
+        }
+      ],
+      "summary": "The exception branch returns an empty result instead of propagating a failed fetch.",
+      "whyItMatters": "The caller cannot distinguish a failed refresh from a successful empty refresh, preventing its retry and failure reporting.",
+      "acceptableExplanations": [
+        "ConnectionError is swallowed by returning [].",
+        "The refresh contract requires raising remote failures.",
+        "An empty success result hides a network error."
+      ],
+      "keyConcepts": [
+        "exception propagation",
+        "failure reporting",
+        "retry"
+      ],
+      "commonConfusions": [
+        "Logging an exception does not notify the caller that the operation failed."
+      ],
+      "suggestedFix": "Re-raise ConnectionError after logging and test that failures never call Source.save."
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "py-medium-001",
+  "revision": 1,
+  "language": "python",
+  "difficulty": "medium",
+  "title": "Stream the row refresh",
+  "description": "A data refresh switches to lazy iteration and adjusts its error path.",
+  "commitMessage": "Avoid eagerly materializing remote rows and log the batch size.",
+  "reviewContext": "Source.fetch returns a one-shot iterator and may raise ConnectionError while fetching or iterating. Refresh must save and return all fetched rows exactly once. Fetch failures must be raised to the caller, leaving saved data unchanged.",
+  "files": [
+    {
+      "path": "app/refresh.py",
+      "status": "modified",
+      "before": "import logging\nfrom .source import Source\n\nlogger = logging.getLogger(__name__)\n\ndef refresh_rows(source: Source) -> list[str]:\n    try:\n        rows = list(source.fetch())\n    except ConnectionError:\n        logger.exception(\"Could not fetch rows\")\n        raise\n    logger.info(\"Fetched %d rows\", len(rows))\n    source.save(rows)\n    return rows\n",
+      "after": "import logging\nfrom .source import Source\n\nlogger = logging.getLogger(__name__)\n\ndef refresh_rows(source: Source) -> list[str]:\n    try:\n        rows = source.fetch()\n        logger.info(\"Fetched %d rows\", sum(1 for _ in rows))\n    except ConnectionError:\n        logger.exception(\"Could not fetch rows\")\n        return []\n    snapshot = list(rows)\n    source.save(snapshot)\n    return snapshot\n"
+    },
+    {
+      "path": "app/source.py",
+      "status": "unchanged",
+      "before": "from collections.abc import Iterator, Sequence\nfrom typing import Protocol\n\nclass Source(Protocol):\n    def fetch(self) -> Iterator[str]: ...\n    def save(self, rows: Sequence[str]) -> None: ...\n",
+      "after": "from collections.abc import Iterator, Sequence\nfrom typing import Protocol\n\nclass Source(Protocol):\n    def fetch(self) -> Iterator[str]: ...\n    def save(self, rows: Sequence[str]) -> None: ...\n"
+    }
+  ],
+  "tags": [
+    "iterators",
+    "error handling"
+  ]
+}

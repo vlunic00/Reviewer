@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "ts-easy-001",
+  "revision": 1,
+  "language": "typescript",
+  "difficulty": "easy",
+  "title": "Simplify pagination totals",
+  "description": "A pagination helper changes how it calculates the last page.",
+  "commitMessage": "Simplify the page-count calculation used by list navigation.",
+  "reviewContext": "Every item must remain reachable. A partially filled page still counts as a page. Zero items means zero pages; invalid inputs should raise a RangeError.",
+  "files": [
+    {
+      "path": "src/pagination.ts",
+      "status": "modified",
+      "before": "export function pageCount(totalItems: number, pageSize: number): number {\n  if (!Number.isInteger(totalItems) || totalItems < 0) {\n    throw new RangeError(\"totalItems must be a nonnegative integer\");\n  }\n  if (!Number.isInteger(pageSize) || pageSize <= 0) {\n    throw new RangeError(\"pageSize must be a positive integer\");\n  }\n  return Math.ceil(totalItems / pageSize);\n}\n",
+      "after": "export function pageCount(totalItems: number, pageSize: number): number {\n  if (!Number.isInteger(totalItems) || totalItems < 0) {\n    throw new RangeError(\"totalItems must be a nonnegative integer\");\n  }\n  if (!Number.isInteger(pageSize) || pageSize <= 0) {\n    throw new RangeError(\"pageSize must be a positive integer\");\n  }\n  return Math.floor(totalItems / pageSize);\n}\n"
+    },
+    {
+      "path": "src/list-navigation.ts",
+      "status": "unchanged",
+      "before": "import { pageCount } from \"./pagination\";\n\nexport function pageNumbers(totalItems: number): number[] {\n  return Array.from({ length: pageCount(totalItems, 20) }, (_, index) => index + 1);\n}\n",
+      "after": "import { pageCount } from \"./pagination\";\n\nexport function pageNumbers(totalItems: number): number[] {\n  return Array.from({ length: pageCount(totalItems, 20) }, (_, index) => index + 1);\n}\n"
+    }
+  ],
+  "tags": [
+    "correctness",
+    "boundaries"
+  ]
+}

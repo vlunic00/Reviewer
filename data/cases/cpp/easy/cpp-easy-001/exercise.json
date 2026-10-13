@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "cpp-easy-001",
+  "revision": 1,
+  "language": "cpp",
+  "difficulty": "easy",
+  "title": "Preallocate display labels",
+  "description": "A vector allocation change aims to reduce work when labeling identifiers.",
+  "commitMessage": "Reserve label capacity before filling the output vector.",
+  "reviewContext": "labelIds must return one prefixed string for each input identifier, preserving order. Empty input should return an empty vector. The project uses C++17.",
+  "files": [
+    {
+      "path": "src/labels.cpp",
+      "status": "modified",
+      "before": "#include \"labels.hpp\"\n\nstd::vector<std::string> labelIds(const std::vector<std::string>& ids) {\n    std::vector<std::string> labels(ids.size());\n    for (std::size_t i = 0; i < ids.size(); ++i) {\n        labels[i] = \"item-\" + ids[i];\n    }\n    return labels;\n}\n",
+      "after": "#include \"labels.hpp\"\n\nstd::vector<std::string> labelIds(const std::vector<std::string>& ids) {\n    std::vector<std::string> labels;\n    labels.reserve(ids.size());\n    for (std::size_t i = 0; i < ids.size(); ++i) {\n        labels[i] = \"item-\" + ids[i];\n    }\n    return labels;\n}\n"
+    },
+    {
+      "path": "src/labels.hpp",
+      "status": "unchanged",
+      "before": "#pragma once\n#include <string>\n#include <vector>\n\nstd::vector<std::string> labelIds(const std::vector<std::string>& ids);\n",
+      "after": "#pragma once\n#include <string>\n#include <vector>\n\nstd::vector<std::string> labelIds(const std::vector<std::string>& ids);\n"
+    }
+  ],
+  "tags": [
+    "containers",
+    "memory safety"
+  ]
+}

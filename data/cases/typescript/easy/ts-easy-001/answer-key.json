@@ -1,0 +1,42 @@
+{
+  "exerciseId": "ts-easy-001",
+  "revision": 1,
+  "issues": [
+    {
+      "id": "issue-001",
+      "title": "The last partial page disappears",
+      "category": "correctness",
+      "severity": "medium",
+      "locations": [
+        {
+          "filePath": "src/pagination.ts",
+          "side": "old",
+          "startLine": 8,
+          "endLine": 8
+        },
+        {
+          "filePath": "src/pagination.ts",
+          "side": "new",
+          "startLine": 8,
+          "endLine": 8
+        }
+      ],
+      "summary": "Rounding down undercounts pages whenever the item count is not divisible by the page size.",
+      "whyItMatters": "For 21 items with a page size of 20, the UI shows one page and the final item is unreachable.",
+      "acceptableExplanations": [
+        "A partial page still needs a navigation entry.",
+        "Math.floor loses the remainder page.",
+        "Use a ceiling when dividing the total by the page size."
+      ],
+      "keyConcepts": [
+        "rounding",
+        "partial page",
+        "remainder"
+      ],
+      "commonConfusions": [
+        "The page count is not the number of completely filled pages."
+      ],
+      "suggestedFix": "Keep Math.ceil and test 0, 1, 20, and 21 items at page size 20."
+    }
+  ]
+}

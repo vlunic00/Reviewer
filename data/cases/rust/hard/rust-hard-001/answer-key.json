@@ -1,0 +1,48 @@
+{
+  "exerciseId": "rust-hard-001",
+  "revision": 1,
+  "issues": [
+    {
+      "id": "issue-001",
+      "title": "Readiness no longer publishes the value",
+      "category": "concurrency",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "src/slot.rs",
+          "side": "old",
+          "startLine": 15,
+          "endLine": 15
+        },
+        {
+          "filePath": "src/slot.rs",
+          "side": "new",
+          "startLine": 15,
+          "endLine": 15
+        },
+        {
+          "filePath": "src/slot.rs",
+          "side": "new",
+          "startLine": 19,
+          "endLine": 19
+        }
+      ],
+      "summary": "A Relaxed flag store does not synchronize with the consumer's Acquire load.",
+      "whyItMatters": "The consumer can observe ready=true while still reading the initial value zero; atomics alone do not establish the required publication ordering.",
+      "acceptableExplanations": [
+        "The readiness store must be Release to synchronize with Acquire.",
+        "Removing Release loses the happens-before guarantee for the value store.",
+        "The reader may see the flag without seeing the newly published value."
+      ],
+      "keyConcepts": [
+        "release-acquire",
+        "synchronization",
+        "publication"
+      ],
+      "commonConfusions": [
+        "An Acquire load does not synchronize with a Relaxed store just because both access the same atomic."
+      ],
+      "suggestedFix": "Restore Release on the readiness store and preserve Acquire on the read. Use an ordering-aware concurrency test rather than relying only on repeated ordinary executions."
+    }
+  ]
+}

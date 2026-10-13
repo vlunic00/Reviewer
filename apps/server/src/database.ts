@@ -1,0 +1,61 @@
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import type { CaseSummary } from '../../../packages/shared/src/index.js';
+
+export function openDatabase(path: string): DatabaseSync {
+  if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
+  const database = new DatabaseSync(path);
+  try {
+    database.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+    const version = database.prepare('PRAGMA user_version').get()?.user_version;
+    if (version === 0) {
+      database.exec(`
+        BEGIN;
+        CREATE TABLE attempts (
+          id TEXT PRIMARY KEY,
+          exercise_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          checksum TEXT NOT NULL,
+          exercise_snapshot TEXT NOT NULL,
+          answer_key_snapshot TEXT NOT NULL,
+          state TEXT NOT NULL DEFAULT 'draft' CHECK (state IN ('draft', 'submitted')),
+          started_at TEXT NOT NULL,
+          submitted_at TEXT,
+          CHECK ((state = 'draft' AND submitted_at IS NULL)
+            OR (state = 'submitted' AND submitted_at IS NOT NULL))
+        );
+        CREATE INDEX attempts_exercise ON attempts(exercise_id);
+        PRAGMA user_version = 1;
+        COMMIT;
+      `);
+    } else if (version !== 1) {
+      throw new Error(
+        'This progress database requires a newer application version.',
+      );
+    }
+    return database;
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+}
+
+export function getProgress(
+  database: DatabaseSync,
+): Map<string, CaseSummary['status']> {
+  const rows = database
+    .prepare(
+      `
+    SELECT exercise_id, MAX(CASE WHEN state = 'submitted' THEN 1 ELSE 0 END) AS completed
+    FROM attempts GROUP BY exercise_id
+  `,
+    )
+    .all();
+  return new Map(
+    rows.map((row) => [
+      String(row.exercise_id),
+      row.completed === 1 ? 'completed' : 'in_progress',
+    ]),
+  );
+}

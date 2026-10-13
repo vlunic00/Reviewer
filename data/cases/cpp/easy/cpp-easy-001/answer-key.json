@@ -1,0 +1,42 @@
+{
+  "exerciseId": "cpp-easy-001",
+  "revision": 1,
+  "issues": [
+    {
+      "id": "issue-001",
+      "title": "reserve does not create vector elements",
+      "category": "memory safety",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "src/labels.cpp",
+          "side": "new",
+          "startLine": 5,
+          "endLine": 5
+        },
+        {
+          "filePath": "src/labels.cpp",
+          "side": "new",
+          "startLine": 7,
+          "endLine": 7
+        }
+      ],
+      "summary": "The output vector has capacity but size zero; assigning through operator[] accesses nonexistent elements.",
+      "whyItMatters": "Any nonempty input triggers undefined behavior and may corrupt memory or crash.",
+      "acceptableExplanations": [
+        "reserve changes capacity but not size.",
+        "The loop writes out of bounds because labels is empty.",
+        "Use resize or push_back before indexing into the vector."
+      ],
+      "keyConcepts": [
+        "vector size",
+        "capacity",
+        "undefined behavior"
+      ],
+      "commonConfusions": [
+        "Allocated capacity does not make indexed elements exist."
+      ],
+      "suggestedFix": "Keep size initialization, resize before indexing, or use push_back after reserve."
+    }
+  ]
+}
