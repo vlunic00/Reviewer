@@ -29,10 +29,29 @@ export function openDatabase(path: string): DatabaseSync {
         PRAGMA user_version = 1;
         COMMIT;
       `);
-    } else if (version !== 1) {
+    } else if (version !== 1 && version !== 2) {
       throw new Error(
         'This progress database requires a newer application version.',
       );
+    }
+    if (version === 0 || version === 1) {
+      database.exec(`
+        BEGIN;
+        ALTER TABLE attempts ADD COLUMN draft_version INTEGER NOT NULL DEFAULT 0 CHECK (draft_version >= 0);
+        CREATE TABLE review_comments (
+          attempt_id TEXT NOT NULL REFERENCES attempts(id) ON DELETE CASCADE,
+          id TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          file_path TEXT NOT NULL,
+          side TEXT NOT NULL CHECK (side IN ('old', 'new')),
+          start_line INTEGER NOT NULL CHECK (start_line > 0),
+          end_line INTEGER NOT NULL CHECK (end_line >= start_line),
+          body TEXT NOT NULL,
+          PRIMARY KEY (attempt_id, id)
+        );
+        PRAGMA user_version = 2;
+        COMMIT;
+      `);
     }
     return database;
   } catch (error) {

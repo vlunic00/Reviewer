@@ -21,7 +21,9 @@ export async function startServer(development = false) {
     .max(65535)
     .parse(process.env.WEB_PORT ?? 5173);
   const cases = await loadCases(resolve('data/cases'));
-  const database = openDatabase(resolve('data/app.sqlite'));
+  const database = openDatabase(
+    process.env.SQLITE_PATH ?? resolve('data/app.sqlite'),
+  );
   const origins = [`http://127.0.0.1:${port}`];
   if (development) origins.push(`http://127.0.0.1:${webPort}`);
   const app = createApp(cases, database, origins);

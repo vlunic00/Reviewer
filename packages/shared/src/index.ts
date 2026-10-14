@@ -200,5 +200,40 @@ export const caseSummarySchema = z.strictObject({
   description: textSchema,
   changedFileCount: z.number().int().nonnegative(),
   status: z.enum(['not_started', 'in_progress', 'completed']),
+  draftAttemptId: z.string().min(1).nullable().optional(),
 });
 export type CaseSummary = z.infer<typeof caseSummarySchema>;
+
+export const reviewCommentSchema = z.strictObject({
+  id: z.uuid(),
+  anchor: anchorSchema,
+  body: z.string().trim().min(1).max(8000),
+});
+export type ReviewComment = z.infer<typeof reviewCommentSchema>;
+export const commentsSchema = z
+  .array(reviewCommentSchema)
+  .max(500)
+  .superRefine((comments, context) => {
+    if (
+      new Set(comments.map((comment) => comment.id)).size !== comments.length
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Comment IDs must be unique.',
+      });
+    }
+  });
+export const saveCommentsSchema = z.strictObject({
+  version: z.number().int().nonnegative(),
+  comments: commentsSchema,
+});
+export const attemptSchema = z.strictObject({
+  id: z.uuid(),
+  state: z.enum(['draft', 'submitted']),
+  version: z.number().int().nonnegative(),
+  startedAt: z.string(),
+  exercise: exerciseSchema,
+  comments: commentsSchema,
+  diffs: z.record(filePathSchema, z.string()),
+});
+export type ReviewAttempt = z.infer<typeof attemptSchema>;

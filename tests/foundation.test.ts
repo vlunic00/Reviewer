@@ -1,9 +1,11 @@
 import { once } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { request as httpRequest, type Server } from 'node:http';
-import type { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
+import { parseDiff } from 'react-diff-view';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   answerKeySchema,
@@ -15,6 +17,7 @@ import {
 import { createApp } from '../apps/server/src/app.js';
 import { loadCases, type LoadedCase } from '../apps/server/src/cases.js';
 import { getProgress, openDatabase } from '../apps/server/src/database.js';
+import { buildDiffs, getAttempt } from '../apps/server/src/attempts.js';
 
 let cases: Map<string, LoadedCase>;
 let database: DatabaseSync;
@@ -40,13 +43,26 @@ afterAll(async () => {
 
 function request(
   path: string,
-  options: { headers?: Record<string, string> } = {},
+  options: {
+    headers?: Record<string, string>;
+    method?: string;
+    body?: unknown;
+  } = {},
 ): Promise<Response> {
   // Native HTTP preserves the Host override used to exercise the local-origin boundary.
   return new Promise((accept, reject) => {
     const outgoing = httpRequest(
       `${baseUrl}${path}`,
-      { headers: { host, ...options.headers } },
+      {
+        method: options.method ?? 'GET',
+        headers: {
+          host,
+          ...(options.body !== undefined
+            ? { 'content-type': 'application/json' }
+            : {}),
+          ...options.headers,
+        },
+      },
       (incoming) => {
         incoming.setEncoding('utf8');
         let body = '';
@@ -67,7 +83,9 @@ function request(
       },
     );
     outgoing.on('error', reject);
-    outgoing.end();
+    outgoing.end(
+      options.body === undefined ? undefined : JSON.stringify(options.body),
+    );
   });
 }
 
@@ -416,5 +434,229 @@ describe('SQLite foundation', () => {
         .prepare('DELETE FROM attempts WHERE id = ?')
         .run('private-draft');
     }
+  });
+});
+
+describe('review drafts', () => {
+  async function draft() {
+    const response = await request('/api/attempts', {
+      method: 'POST',
+      body: { exerciseId: 'ts-easy-001' },
+    });
+    expect(response.status).toBe(201);
+    return response.json();
+  }
+  const comment = (side = 'new', endLine = 8) => ({
+    id: randomUUID(),
+    anchor: { filePath: 'src/pagination.ts', side, startLine: 8, endLine },
+    body: 'The remainder page disappears.',
+  });
+
+  it('starts and reloads a private-key-free snapshot with backend-generated diffs', async () => {
+    const attempt = await draft();
+    expect(attempt.version).toBe(0);
+    expect(attempt.comments).toEqual([]);
+    expect(attempt.exercise.revision).toBe(2);
+    expect(
+      parseDiff(attempt.diffs['src/pagination.ts'])[0].hunks.length,
+    ).toBeGreaterThan(0);
+    const response = await request(`/api/attempts/${attempt.id}`);
+    expect(await response.json()).toEqual(attempt);
+    const serialized = JSON.stringify(attempt);
+    for (const issue of cases.get('ts-easy-001')!.answerKey.issues) {
+      expect(serialized).not.toContain(issue.explanation);
+      expect(serialized).not.toContain(issue.prevention);
+    }
+    const library = await (
+      await request('/api/cases?language=typescript&difficulty=easy')
+    ).json();
+    expect(library[0].draftAttemptId).toBe(attempt.id);
+  });
+
+  it('persists ordered old/new/context comments, edits, and deletion atomically', async () => {
+    const attempt = await draft();
+    const comments = [
+      comment('old'),
+      comment(),
+      {
+        id: randomUUID(),
+        anchor: {
+          filePath: 'src/list-navigation.ts',
+          side: 'new',
+          startLine: 1,
+          endLine: 3,
+        },
+        body: 'A note on the caller.',
+      },
+    ];
+    const saved = await request(`/api/attempts/${attempt.id}/comments`, {
+      method: 'PUT',
+      body: { version: 0, comments },
+    });
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).comments).toEqual(comments);
+    const edited = [{ ...comments[1], body: 'A clarified explanation.' }];
+    expect(
+      (
+        await request(`/api/attempts/${attempt.id}/comments`, {
+          method: 'PUT',
+          body: { version: 1, comments: edited },
+        })
+      ).status,
+    ).toBe(200);
+    const reloaded = await (
+      await request(`/api/attempts/${attempt.id}`)
+    ).json();
+    expect(reloaded.version).toBe(2);
+    expect(reloaded.comments).toEqual(edited);
+  });
+
+  it('rejects stale saves, invalid anchors, duplicate IDs, and submitted edits without data loss', async () => {
+    const attempt = await draft();
+    const original = [comment()];
+    const url = `/api/attempts/${attempt.id}/comments`;
+    expect(
+      (
+        await request(url, {
+          method: 'PUT',
+          body: { version: 0, comments: original },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await request(url, {
+          method: 'PUT',
+          body: { version: 0, comments: original },
+        })
+      ).status,
+    ).toBe(200);
+    expect(getAttempt(database, attempt.id).version).toBe(1);
+    for (const [version, comments, status] of [
+      [0, [], 409],
+      [1, [comment('new', 999)], 400],
+      [1, [original[0], original[0]], 400],
+      [1, [{ ...comment(), body: ' ' }], 400],
+    ] as const) {
+      expect(
+        (await request(url, { method: 'PUT', body: { version, comments } }))
+          .status,
+      ).toBe(status);
+      expect(getAttempt(database, attempt.id).comments).toEqual(original);
+      expect(getAttempt(database, attempt.id).version).toBe(1);
+    }
+    database
+      .prepare(
+        "UPDATE attempts SET state = 'submitted', submitted_at = ? WHERE id = ?",
+      )
+      .run(new Date().toISOString(), attempt.id);
+    expect(
+      (
+        await request(url, {
+          method: 'PUT',
+          body: { version: 1, comments: [] },
+        })
+      ).status,
+    ).toBe(409);
+    expect(getAttempt(database, attempt.id).comments).toEqual(original);
+  });
+
+  it('keeps draft content after the source case changes or disappears', async () => {
+    const attempt = await draft();
+    const loaded = cases.get('ts-easy-001')!;
+    cases.delete('ts-easy-001');
+    try {
+      expect((await request('/api/cases/ts-easy-001')).status).toBe(404);
+      const reloaded = await (
+        await request(`/api/attempts/${attempt.id}`)
+      ).json();
+      expect(reloaded.exercise).toEqual(attempt.exercise);
+      expect(
+        (
+          await request(`/api/attempts/${attempt.id}/comments`, {
+            method: 'PUT',
+            body: { version: 0, comments: [comment()] },
+          })
+        ).status,
+      ).toBe(200);
+    } finally {
+      cases.set('ts-easy-001', loaded);
+    }
+  });
+
+  it('migrates a version-1 database without replacing its historical snapshots', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'reviewer-migration-'));
+    const path = join(directory, 'progress.sqlite');
+    const id = randomUUID();
+    const exercise = cases.get('ts-easy-001')!.exercise;
+    const legacy = new DatabaseSync(path);
+    legacy.exec(
+      `CREATE TABLE attempts (id TEXT PRIMARY KEY, exercise_id TEXT, revision INTEGER, checksum TEXT, exercise_snapshot TEXT, answer_key_snapshot TEXT, state TEXT DEFAULT 'draft', started_at TEXT, submitted_at TEXT); PRAGMA user_version = 1;`,
+    );
+    legacy
+      .prepare(
+        'INSERT INTO attempts (id, exercise_id, revision, checksum, exercise_snapshot, answer_key_snapshot, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        id,
+        exercise.id,
+        1,
+        'legacy-checksum',
+        JSON.stringify({ ...exercise, revision: 1 }),
+        '{"legacy":"preserve me"}',
+        new Date().toISOString(),
+      );
+    legacy.close();
+    const upgraded = openDatabase(path);
+    try {
+      expect(upgraded.prepare('PRAGMA user_version').get()?.user_version).toBe(
+        2,
+      );
+      expect(getAttempt(upgraded, id).exercise.revision).toBe(1);
+      expect(
+        upgraded
+          .prepare('SELECT answer_key_snapshot FROM attempts WHERE id = ?')
+          .get(id)?.answer_key_snapshot,
+      ).toBe('{"legacy":"preserve me"}');
+    } finally {
+      upgraded.close();
+      await removeTemporary(directory, directory);
+    }
+  });
+
+  it('generates added/deleted/context diffs and keeps version line numbers after deletions', () => {
+    const exercise = exerciseSchema.parse({
+      ...cases.get('ts-easy-001')!.exercise,
+      files: [
+        { path: 'add.ts', status: 'added', after: 'hello\r\n' },
+        { path: 'gone.ts', status: 'deleted', before: 'bye\n' },
+        {
+          path: 'same.ts',
+          status: 'unchanged',
+          before: 'same\n',
+          after: 'same\n',
+        },
+        {
+          path: 'change.ts',
+          status: 'modified',
+          before: 'a\nb\nc\n',
+          after: 'a\nc\n',
+        },
+      ],
+    });
+    const diffs = buildDiffs(exercise);
+    expect(parseDiff(diffs['add.ts'])[0].hunks[0].changes[0].type).toBe(
+      'insert',
+    );
+    expect(parseDiff(diffs['gone.ts'])[0].hunks[0].changes[0].type).toBe(
+      'delete',
+    );
+    expect(parseDiff(diffs['same.ts'])[0].hunks).toEqual([]);
+    const normal = parseDiff(diffs['change.ts'])[0].hunks[0].changes.at(-1)!;
+    expect(normal).toMatchObject({
+      type: 'normal',
+      oldLineNumber: 3,
+      newLineNumber: 2,
+    });
   });
 });

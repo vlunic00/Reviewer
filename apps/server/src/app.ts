@@ -1,5 +1,6 @@
 import express, { type ErrorRequestHandler } from 'express';
 import type { DatabaseSync } from 'node:sqlite';
+import { z } from 'zod';
 import {
   caseIdSchema,
   caseSummarySchema,
@@ -9,6 +10,12 @@ import {
 } from '../../../packages/shared/src/index.js';
 import type { LoadedCase } from './cases.js';
 import { getProgress } from './database.js';
+import {
+  AttemptError,
+  createAttempt,
+  getAttempt,
+  saveComments,
+} from './attempts.js';
 
 export function createApp(
   cases: Map<string, LoadedCase>,
@@ -44,6 +51,7 @@ export function createApp(
     response.set('Cache-Control', 'no-store');
     next();
   });
+  app.use(express.json({ limit: '5mb' }));
   app.get('/api/languages', (_request, response) => response.json(languages));
   app.get('/api/cases', (request, response) => {
     const language = languageSchema.safeParse(request.query.language);
@@ -55,6 +63,14 @@ export function createApp(
       return;
     }
     const progress = getProgress(database);
+    const draftRows = database
+      .prepare(
+        "SELECT id, exercise_id FROM attempts WHERE state = 'draft' ORDER BY started_at, rowid",
+      )
+      .all();
+    const drafts = new Map(
+      draftRows.map((row) => [String(row.exercise_id), String(row.id)]),
+    );
     const summaries = [...cases.values()]
       .filter(
         ({ exercise }) =>
@@ -73,6 +89,7 @@ export function createApp(
             (file) => file.status !== 'unchanged',
           ).length,
           status: progress.get(exercise.id) ?? 'not_started',
+          draftAttemptId: drafts.get(exercise.id) ?? null,
         }),
       )
       .sort((left, right) => left.id.localeCompare(right.id));
@@ -91,6 +108,22 @@ export function createApp(
     }
     response.json(loaded.exercise);
   });
+  app.post('/api/attempts', (request, response) => {
+    const { exerciseId } = z
+      .strictObject({ exerciseId: caseIdSchema })
+      .parse(request.body);
+    const loaded = cases.get(exerciseId);
+    if (!loaded) throw new AttemptError(404, 'Exercise not found.');
+    response.status(201).json(createAttempt(database, loaded));
+  });
+  app.get('/api/attempts/:id', (request, response) => {
+    response.json(getAttempt(database, z.uuid().parse(request.params.id)));
+  });
+  app.put('/api/attempts/:id/comments', (request, response) => {
+    response.json(
+      saveComments(database, z.uuid().parse(request.params.id), request.body),
+    );
+  });
   app.use('/api', (_request, response) =>
     response.status(404).json({ error: 'API route not found.' }),
   );
@@ -100,6 +133,26 @@ export function createApp(
     response,
     _next,
   ) => {
+    if (error instanceof AttemptError) {
+      response.status(error.status).json({ error: error.message });
+      return;
+    }
+    if (
+      error instanceof z.ZodError ||
+      (error instanceof SyntaxError && 'body' in error)
+    ) {
+      response
+        .status(400)
+        .json({
+          error:
+            'Invalid request data. Check the comment fields and line range.',
+        });
+      return;
+    }
+    if (error?.type === 'entity.too.large') {
+      response.status(413).json({ error: 'The review is too large to save.' });
+      return;
+    }
     console.error(error);
     response
       .status(500)
