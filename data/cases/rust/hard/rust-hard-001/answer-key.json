@@ -1,6 +1,6 @@
 {
   "exerciseId": "rust-hard-001",
-  "revision": 1,
+  "revision": 2,
   "issues": [
     {
       "id": "issue-001",
@@ -42,7 +42,16 @@
       "commonConfusions": [
         "An Acquire load does not synchronize with a Relaxed store just because both access the same atomic."
       ],
-      "suggestedFix": "Restore Release on the readiness store and preserve Acquire on the read. Use an ordering-aware concurrency test rather than relying only on repeated ordinary executions."
+      "suggestedFix": "Restore Release on ready.store while retaining Acquire on ready.load. When the reader observes the published flag, that synchronization orders the preceding value store before its subsequent value load. Keep the write-once producer/consumer contract; stronger ordering does not justify silently changing it.",
+      "explanation": "The slot publishes a value through a readiness flag. The value is stored with Relaxed ordering; correctness depends on a Release store to ready synchronizing with the consumer Acquire load that observes it. That pair makes the earlier value store visible to the later value load.\n\nChanging the readiness store to Relaxed removes that synchronization. Acquire on the reader does not create a publication guarantee when the store it observes is Relaxed. All accesses remain atomic, so the defect is not an ordinary data race or undefined behavior. The allowed atomic execution can instead return the initial zero after readiness is observed, violating the slot contract.",
+      "failureExample": "The producer publishes 7: it stores 7 into value and then true into ready using the revised Relaxed ordering. An allowed observation is that the consumer Acquire-load sees ready = true but its Relaxed value load still sees the initial 0. Expected: Some(7); actual allowed result: Some(0). This is a memory-ordering argument, not a promise that an ordinary test run on every CPU will reproduce it.",
+      "prevention": "For publication patterns, identify the precise Release/Acquire pair and what data it protects. Check the operation that supplied the observed flag value, not merely the ordering written on the reader. Preserve the single-publication assumptions in tests, and use ordering-aware model checking when validating weak-memory behavior.",
+      "correctedCode": [
+        {
+          "filePath": "src/slot.rs",
+          "code": "use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};\n\npub struct PublishSlot {\n    value: AtomicUsize,\n    ready: AtomicBool,\n}\n\nimpl PublishSlot {\n    pub fn new() -> Self {\n        Self { value: AtomicUsize::new(0), ready: AtomicBool::new(false) }\n    }\n\n    pub fn publish(&self, value: usize) {\n        self.value.store(value, Ordering::Relaxed);\n        self.ready.store(true, Ordering::Release);\n    }\n\n    pub fn read(&self) -> Option<usize> {\n        if self.ready.load(Ordering::Acquire) {\n            Some(self.value.load(Ordering::Relaxed))\n        } else {\n            None\n        }\n    }\n}\n"
+        }
+      ]
     }
   ]
 }

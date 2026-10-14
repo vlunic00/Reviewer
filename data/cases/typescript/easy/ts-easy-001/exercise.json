@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "ts-easy-001",
-  "revision": 1,
+  "revision": 2,
   "language": "typescript",
   "difficulty": "easy",
   "title": "Simplify pagination totals",

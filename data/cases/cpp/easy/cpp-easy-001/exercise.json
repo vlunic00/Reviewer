@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "cpp-easy-001",
-  "revision": 1,
+  "revision": 2,
   "language": "cpp",
   "difficulty": "easy",
   "title": "Preallocate display labels",

@@ -139,11 +139,35 @@ describe('case validation', () => {
       }).success,
     ).toBe(false);
     expect(() =>
-      validateAnswerKey(exercise, { ...answerKey, revision: 2 }),
+      validateAnswerKey(exercise, {
+        ...answerKey,
+        revision: exercise.revision + 1,
+      }),
     ).toThrow('ID/revision');
     expect(() =>
       validateAnswerKey(exercise, { ...answerKey, exerciseId: 'wrong-case' }),
     ).toThrow('ID/revision');
+  });
+
+  it('requires complete worked lessons and corrections in supplied files', () => {
+    const { exercise, answerKey } = cases.get('ts-easy-001')!;
+    for (const field of [
+      'explanation',
+      'failureExample',
+      'correctedCode',
+      'prevention',
+    ]) {
+      const incomplete = structuredClone(answerKey) as unknown as {
+        issues: Record<string, unknown>[];
+      };
+      delete incomplete.issues[0][field];
+      expect(answerKeySchema.safeParse(incomplete).success).toBe(false);
+    }
+    const invalid = structuredClone(answerKey);
+    invalid.issues[0].correctedCode[0].filePath = 'missing.ts';
+    expect(() => validateAnswerKey(exercise, invalid)).toThrow('unknown file');
+    invalid.issues[0].correctedCode = [];
+    expect(answerKeySchema.safeParse(invalid).success).toBe(false);
   });
 
   it('validates old/new anchors against real lines, including CRLF and empty files', () => {

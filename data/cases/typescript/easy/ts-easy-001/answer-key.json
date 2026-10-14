@@ -1,6 +1,6 @@
 {
   "exerciseId": "ts-easy-001",
-  "revision": 1,
+  "revision": 2,
   "issues": [
     {
       "id": "issue-001",
@@ -36,7 +36,16 @@
       "commonConfusions": [
         "The page count is not the number of completely filled pages."
       ],
-      "suggestedFix": "Keep Math.ceil and test 0, 1, 20, and 21 items at page size 20."
+      "suggestedFix": "Restore Math.ceil. It includes the remainder page while preserving zero pages for zero items and the correct result for exact multiples. The existing argument validation must remain in place.",
+      "explanation": "Page navigation must include every item, including a final page that is only partially filled. Dividing the item count by page size gives a fractional number when the last page is incomplete. Math.ceil turns that fraction into the additional page required by the contract.\n\nThe new Math.floor counts only completely filled pages. The unchanged pageNumbers caller creates exactly that many navigation entries, so it omits the page containing the remaining items. Input validation still works, but it does not repair this rounding regression.",
+      "failureExample": "With 21 items and a page size of 20, the quotient is 1.05. Expected: two navigation entries, with the final item on page 2. Actual: Math.floor returns 1 and pageNumbers exposes only page 1. With 1 item the function incorrectly returns zero pages; 0 and 20 items happen to work, which can conceal the defect in ordinary tests.",
+      "prevention": "For counts divided into fixed-size groups, ask what happens to a remainder. Follow the value into callers rather than inspecting arithmetic alone. Check 0, 1, 19, 20, 21, and 40 items at page size 20; keep invalid-input checks as separate tests.",
+      "correctedCode": [
+        {
+          "filePath": "src/pagination.ts",
+          "code": "export function pageCount(totalItems: number, pageSize: number): number {\n  if (!Number.isInteger(totalItems) || totalItems < 0) {\n    throw new RangeError(\"totalItems must be a nonnegative integer\");\n  }\n  if (!Number.isInteger(pageSize) || pageSize <= 0) {\n    throw new RangeError(\"pageSize must be a positive integer\");\n  }\n  return Math.ceil(totalItems / pageSize);\n}\n"
+        }
+      ]
     }
   ]
 }

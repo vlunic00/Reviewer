@@ -104,6 +104,22 @@ const issueSchema = z.strictObject({
   severity: z.enum(['low', 'medium', 'high', 'critical']),
   locations: z.array(anchorSchema).min(1),
   summary: textSchema,
+  explanation: textSchema,
+  failureExample: textSchema,
+  correctedCode: z
+    .array(
+      z.strictObject({
+        filePath: filePathSchema,
+        code: z
+          .string()
+          .refine(
+            (code) => code.trim().length > 0,
+            'Corrected code must not be empty.',
+          ),
+      }),
+    )
+    .min(1),
+  prevention: textSchema,
   whyItMatters: textSchema,
   acceptableExplanations: z.array(textSchema).min(1),
   keyConcepts: z.array(textSchema).min(1),
@@ -165,6 +181,13 @@ export function validateAnswerKey(
   }
   for (const issue of key.issues) {
     for (const location of issue.locations) validateAnchor(exercise, location);
+    for (const correction of issue.correctedCode) {
+      if (!exercise.files.some((file) => file.path === correction.filePath)) {
+        throw new Error(
+          `Corrected code refers to an unknown file: ${correction.filePath}.`,
+        );
+      }
+    }
   }
 }
 

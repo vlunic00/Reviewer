@@ -1,6 +1,6 @@
 {
   "exerciseId": "py-medium-001",
-  "revision": 1,
+  "revision": 2,
   "issues": [
     {
       "id": "issue-001",
@@ -36,7 +36,16 @@
       "commonConfusions": [
         "An iterator is not a reusable list."
       ],
-      "suggestedFix": "Materialize once, log len(snapshot), and save and return that same snapshot."
+      "suggestedFix": "Materialize the source once inside the try block, count with len(rows), and use that same list for save and return. This preserves the data and keeps errors raised during iteration inside the exception-handling boundary.",
+      "explanation": "Source.fetch returns a one-shot iterator rather than a reusable collection. The sum expression advances it to exhaustion while counting rows for logging. Exhaustion is permanent for that iterator, even though the rows variable still exists.\n\nThe later list(rows) therefore sees no elements. Source.save receives an empty snapshot and the function returns that empty snapshot, despite a successful fetch. The logging change has consumed the data needed by the operation; this is not a problem with list construction or the save implementation.",
+      "failureExample": "Suppose fetch yields alpha and beta. Expected: log a count of 2, save [alpha, beta], and return [alpha, beta]. Actual: sum consumes both rows and logs 2; list(rows) is then [], so the saved and returned data are empty. Empty-source tests would pass and miss the regression.",
+      "prevention": "When reviewing iterators, trace every consumer, including logging, counting, comprehensions, and conversions. Test with a generator containing at least two rows, not only a list or an empty source, and assert both the saved snapshot and returned value.",
+      "correctedCode": [
+        {
+          "filePath": "app/refresh.py",
+          "code": "import logging\nfrom .source import Source\n\nlogger = logging.getLogger(__name__)\n\ndef refresh_rows(source: Source) -> list[str]:\n    try:\n        rows = list(source.fetch())\n    except ConnectionError:\n        logger.exception(\"Could not fetch rows\")\n        raise\n    logger.info(\"Fetched %d rows\", len(rows))\n    source.save(rows)\n    return rows\n"
+        }
+      ]
     },
     {
       "id": "issue-002",
@@ -72,7 +81,16 @@
       "commonConfusions": [
         "Logging an exception does not notify the caller that the operation failed."
       ],
-      "suggestedFix": "Re-raise ConnectionError after logging and test that failures never call Source.save."
+      "suggestedFix": "Re-raise ConnectionError after logging. Combined with materializing inside the try block, this reports errors from both fetch setup and iteration and prevents callers from interpreting a failure as successful empty data.",
+      "explanation": "The refresh contract distinguishes a successful empty fetch from a failed fetch. Previously, the handler logged ConnectionError and re-raised it so the caller could handle the failure.\n\nThe new exception branch logs the error but returns [], which is also the normal result for a genuinely empty source. The caller receives an apparent success and cannot trigger its retry or failure reporting. Logging records the failure for inspection; it does not propagate failure to the caller. This branch does not call save, so the central defect is the misleading return value rather than a save on that path.",
+      "failureExample": "A fetch iterator raises ConnectionError before returning any rows. Expected: refresh_rows raises that error and Source.save is not called, allowing the caller to retry. Actual: the exception is logged and [] is returned, indistinguishable from a successful empty refresh. The iterator-consumption problem is a separate finding and requires its own correction.",
+      "prevention": "Review exception branches against the API contract and follow their return values into callers. Test errors thrown when fetch is called and while its iterator is consumed. Verify propagation, no save after a failure, and the distinct successful-empty path.",
+      "correctedCode": [
+        {
+          "filePath": "app/refresh.py",
+          "code": "import logging\nfrom .source import Source\n\nlogger = logging.getLogger(__name__)\n\ndef refresh_rows(source: Source) -> list[str]:\n    try:\n        rows = list(source.fetch())\n    except ConnectionError:\n        logger.exception(\"Could not fetch rows\")\n        raise\n    logger.info(\"Fetched %d rows\", len(rows))\n    source.save(rows)\n    return rows\n"
+        }
+      ]
     }
   ]
 }

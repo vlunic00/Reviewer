@@ -1,6 +1,6 @@
 {
   "exerciseId": "cpp-easy-001",
-  "revision": 1,
+  "revision": 2,
   "issues": [
     {
       "id": "issue-001",
@@ -36,7 +36,16 @@
       "commonConfusions": [
         "Allocated capacity does not make indexed elements exist."
       ],
-      "suggestedFix": "Keep size initialization, resize before indexing, or use push_back after reserve."
+      "suggestedFix": "Restore the vector size constructor before indexed assignment. It creates one string element for each input. Alternatively reserve capacity and append with push_back; reserve alone cannot make indexed assignment valid.",
+      "explanation": "A vector has separate size and capacity. Size counts constructed elements that can be accessed by index; capacity is allocated storage available for future elements. reserve increases capacity but leaves size unchanged.\n\nThe revised labels vector is constructed empty and remains size zero after reserve. The loop then assigns to labels[i] for each input, but no such element exists. operator[] does not grow the vector or perform a checked insertion. Accessing it outside size causes undefined behavior, even if memory was reserved. The old size constructor created the elements before indexed assignment.",
+      "failureExample": "For ids = [abc], expected output is [item-abc]. Actual: labels has size 0 and capacity at least 1, and the first assignment writes through labels[0], outside the valid element range. It may crash, corrupt memory, or appear to work; undefined behavior has no guaranteed observable outcome. Empty input skips the loop and can conceal the defect.",
+      "prevention": "When reviewing indexed writes into standard containers, track size independently from capacity and verify that elements exist before assignment. Test nonempty and empty inputs. At authoring time, a checked standard-library build or suitable sanitizer can help expose invalid accesses; do not rely on a crash in every run.",
+      "correctedCode": [
+        {
+          "filePath": "src/labels.cpp",
+          "code": "#include \"labels.hpp\"\n\nstd::vector<std::string> labelIds(const std::vector<std::string>& ids) {\n    std::vector<std::string> labels(ids.size());\n    for (std::size_t i = 0; i < ids.size(); ++i) {\n        labels[i] = \"item-\" + ids[i];\n    }\n    return labels;\n}\n"
+        }
+      ]
     }
   ]
 }

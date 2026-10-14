@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "py-medium-001",
-  "revision": 1,
+  "revision": 2,
   "language": "python",
   "difficulty": "medium",
   "title": "Stream the row refresh",

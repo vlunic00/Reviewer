@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "rust-hard-001",
-  "revision": 1,
+  "revision": 2,
   "language": "rust",
   "difficulty": "hard",
   "title": "Relax the publication flag",
