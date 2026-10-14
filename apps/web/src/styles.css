@@ -474,6 +474,19 @@ label input {
 .exercise-copy {
   flex: 1;
 }
+.card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+.card-actions .preview-button {
+  background: transparent;
+  color: #214b3b;
+}
+.card-actions .preview-button {
+  margin-left: 0;
+}
 .card-meta {
   display: flex;
   align-items: center;

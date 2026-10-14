@@ -10,6 +10,12 @@
   align-items: start;
   margin: 18px 0;
 }
+.review-heading > div:last-child {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
 .review-heading h1 {
   font-family: 'Segoe UI', sans-serif;
   font-size: 30px;

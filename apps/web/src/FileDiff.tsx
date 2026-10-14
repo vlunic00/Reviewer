@@ -22,6 +22,7 @@ type Props = {
   comments: ReviewComment[];
   selection?: ReviewCommentAnchor;
   editor?: ReactNode;
+  editorLine?: number;
   onSelect: (side: 'old' | 'new', line: number, extend: boolean) => void;
   onEdit: (comment: ReviewComment) => void;
   onDelete: (id: string) => void;
@@ -35,6 +36,7 @@ export function FileDiff({
   comments,
   selection,
   editor,
+  editorLine,
   onSelect,
   onEdit,
   onDelete,
@@ -75,7 +77,8 @@ export function FileDiff({
       const isSelected =
         selection &&
         (mode === 'diff' || selection.side === mode) &&
-        lineOnSide(change, selection.side) === selection.endLine;
+        lineOnSide(change, selection.side) ===
+          (editorLine ?? selection.endLine);
       if (attached.length || (isSelected && editor)) {
         widgets[getChangeKey(change)] = (
           <div className="inline-threads">
