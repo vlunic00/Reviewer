@@ -258,7 +258,7 @@ Example (using the same abridged public exercise as above):
 - Do not send `answer-key.json` from any public browsing or exercise API endpoint before review submission.
 - After submission, show the reference answers only in the results flow. This is not hardened anti-cheat security; it is sensible separation for a single-user trainer.
 
-**Existing starter-case follow-up:** the four Phase 1 answer keys have useful summaries but do not yet satisfy this worked-lesson standard. As the next implementation step, extend the strict shared answer-key schema and CLI validation, then expand **all four starter answer keys together**, adding the required fields and manually reviewing their examples/corrections. Increment each changed case's revision in both `exercise.json` and `answer-key.json`; preserve any existing attempt snapshots. Until that coordinated update, the current validator does not enforce the new fields. This documentation change does not modify app code or seed JSON.
+**Starter-case status:** Phase 2 extended the strict shared answer-key schema and CLI validation and expanded **all four starter answer keys together**. All five reference issues now have the required worked-lesson fields, with matching exercise/key revisions incremented to 2. Future changes must update matching revisions and preserve existing attempt snapshots. Structural validation does not replace author review of explanation accuracy or corrected-code consistency.
 
 ### 4.4 Difficulty guidelines
 
@@ -528,7 +528,7 @@ Provide straightforward commands for install, development, case validation, test
 
 **Done when:** the user can select any of the four languages and any difficulty and see the correctly filtered library or a helpful empty state.
 
-**Status:** implemented with four starter cases validated against the original schema, public exercise previews, and all 12 filter combinations. The new worked-lesson fields and expanded starter explanations are not implemented yet; complete that coordinated schema/key update next as specified in Section 4.3. See `README.md` for run/check commands. Review commenting and AI assessment remain in Phases 2–3; complete 12-case coverage remains in Phase 4.
+**Status:** implemented with four starter cases, public exercise previews, and all 12 filter combinations. Phase 2 added the worked-lesson validation/content and persistent draft review workspace. See `README.md` for run/check commands. AI assessment and submitted learning feedback remain in Phase 3; complete 12-case coverage remains in Phase 4.
 
 ### Phase 2 — GitHub-style code review
 
@@ -539,6 +539,8 @@ Provide straightforward commands for install, development, case validation, test
 - Persist drafts and their public/private exercise snapshots; support editing/deleting comments, serialized saves, and visible save errors.
 
 **Done when:** a reviewer can annotate added, deleted, and unchanged code across several files, switch views, reload, and retain accurate anchors.
+
+**Status:** implemented. Start/Continue opens a snapshot-backed workspace with old/new/context range comments, editing/deletion, unified/split views, complete file versions, context expansion, per-language highlighting, serialized autosave, visible save errors, stale-tab protection, and tab-local recovery of unfinished notes. SQLite schema version 2 preserves version-1 attempts/snapshots. Submission and learning-feedback results remain Phase 3 work.
 
 ### Phase 3 — Offline assessment and learning feedback
 
@@ -613,7 +615,7 @@ Model accuracy agreement rates and the 30-example benchmark are follow-up work; 
 
 **Implement the application described above; do not only produce a plan.** Work incrementally, prioritizing a solid review interface, trustworthy reference comparison, and clear teaching explanations, especially for missed issues. The learning experience is the primary outcome.
 
-1. Keep language and difficulty foundational. Next extend the strict shared answer-key schema/validator and upgrade all four existing starter keys together to the worked-lesson standard, updating matching exercise/key revisions. Their current short summaries are not sufficient under this guide.
+1. Keep language and difficulty foundational and enforce the worked-lesson schema for every authored issue. The four starter cases now meet the required structure at revision 2; maintain their teaching quality and update matching exercise/key revisions whenever content changes.
 2. Implement a working vertical slice with **one case**, from library selection through `react-diff-view` range selection/expansion/inline editing to submitted feedback; then extend to the other languages and difficulties.
 3. Maintain strict separation of public exercise data, private reference lessons/snapshots, AI semantic assessment, and backend found/missed counting. Use per-comment `findings[]` with status and explanations; extra findings receive separate AI feedback and do not change reference counts. Do not implement numeric grades or competitive comparisons.
 4. Keep the runtime **fully local**. Ollama is optional for basic use but required for AI-assisted assessment. Do not add cloud-service dependencies.
