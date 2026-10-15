@@ -299,6 +299,72 @@ test('failed assessment and retry preserve lessons, earlier feedback and run his
   ).toEqual(['failed', 'succeeded', 'failed']);
 });
 
+test('saved feedback runs retain their own findings and counts across retries and reloads', async ({
+  page,
+}) => {
+  const attempt = await open(page);
+  await note(
+    page,
+    'both: Counting exhausts rows and failures appear successful.',
+  );
+  await finish(page);
+  await expect(
+    page.getByText('2 found · 0 missed', { exact: true }).first(),
+  ).toBeVisible();
+  const original = (
+    await (await page.request.get(`/api/attempts/${attempt.id}`)).json()
+  ).results.runs[0];
+  await mode('uncertain');
+  await page
+    .getByRole('button', { name: 'Retry AI feedback', exact: true })
+    .click();
+  await expect(
+    page.getByText('0 found · 2 missed', { exact: true }).first(),
+  ).toBeVisible();
+  const picker = page.getByRole('combobox', {
+    name: 'Saved feedback run',
+    exact: true,
+  });
+  await expect(picker.locator('option')).toHaveCount(2);
+  await expect(page.locator('.uncertain-label')).toHaveCount(2);
+  const newestId = await picker.inputValue();
+  expect(newestId).not.toBe(original.id);
+  await picker.selectOption(original.id);
+  await expect(
+    page.getByText('2 found · 0 missed', { exact: true }).first(),
+  ).toBeVisible();
+  await expect(page.locator('.run-caption')).toContainText(
+    original.id.slice(0, 8),
+  );
+  await mode('offline');
+  await page
+    .getByRole('button', { name: 'Retry AI feedback', exact: true })
+    .click();
+  await expect(page.getByRole('alert')).toContainText(
+    'earlier successful feedback',
+  );
+  await expect(picker).toHaveValue(newestId);
+  await expect(
+    page.getByText('0 found · 2 missed', { exact: true }).first(),
+  ).toBeVisible();
+  await picker.selectOption(original.id);
+  await expect(
+    page.getByText('2 found · 0 missed', { exact: true }).first(),
+  ).toBeVisible();
+  await page.reload();
+  await expect(picker).toHaveValue(newestId);
+  await expect(
+    page.getByText('0 found · 2 missed', { exact: true }).first(),
+  ).toBeVisible();
+  const saved = await (
+    await page.request.get(`/api/attempts/${attempt.id}`)
+  ).json();
+  expect(
+    saved.results.runs.map((run: { status: string }) => run.status),
+  ).toEqual(['failed', 'succeeded', 'succeeded']);
+  expect(saved.results.runs[2]).toEqual(original);
+});
+
 test('unfinished notes and failed saves cannot be submitted', async ({
   page,
 }) => {

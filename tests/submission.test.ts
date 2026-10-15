@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -13,6 +13,7 @@ import {
   completeRun,
   failRun,
   getLearningAttempt,
+  getReference,
   getRuns,
   listAttempts,
   retryAssessment,
@@ -141,13 +142,41 @@ describe('immutable submission and assessment history', () => {
     }
   });
 
-  it('recovers pending and running jobs after restart while retaining saved feedback and lessons', async () => {
+  it('retains snapshots and successful feedback after source files change, disappear, and interrupted jobs restart', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'reviewer-assessment-'));
     const path = join(directory, 'app.sqlite');
+    const casesPath = join(directory, 'cases');
     let db = openDatabase(path);
     try {
+      await mkdir(casesPath);
+      const exercisePath = join(casesPath, 'exercise.json');
+      const keyPath = join(casesPath, 'answer-key.json');
+      await writeFile(exercisePath, JSON.stringify(loaded.exercise));
+      await writeFile(keyPath, JSON.stringify(loaded.answerKey));
+      const source = (await loadCases(casesPath)).get(loaded.exercise.id)!;
+      const note = comment();
+      const saved = createAttempt(db, source);
+      saveComments(db, saved.id, { version: 0, comments: [note] });
+      const feedback = [
+        {
+          commentId: note.id,
+          findings: [
+            {
+              matchedIssueId: 'issue-001',
+              status: 'supported' as const,
+              feedback: 'The second consumer receives no rows.',
+            },
+          ],
+        },
+      ];
+      completeRun(db, submitAttempt(db, saved.id, 1)!, feedback);
+      const success = getRuns(db, saved.id)[0];
+      const retry = retryAssessment(db, saved.id)!;
+      db.prepare(
+        "UPDATE assessment_runs SET status = 'running' WHERE id = ?",
+      ).run(retry);
       const ids = ['pending', 'running'].map((status) => {
-        const draft = createAttempt(db, loaded);
+        const draft = createAttempt(db, source);
         saveComments(db, draft.id, { version: 0, comments: [comment()] });
         const run = submitAttempt(db, draft.id, 1)!;
         db.prepare('UPDATE assessment_runs SET status = ? WHERE id = ?').run(
@@ -156,9 +185,21 @@ describe('immutable submission and assessment history', () => {
         );
         return draft.id;
       });
+      source.exercise.revision++;
+      source.answerKey.revision++;
+      source.answerKey.issues[0].explanation =
+        'A changed lesson for future reviews.';
+      await writeFile(exercisePath, JSON.stringify(source.exercise));
+      await writeFile(keyPath, JSON.stringify(source.answerKey));
+      expect(
+        (await loadCases(casesPath)).get(loaded.exercise.id)!.exercise.revision,
+      ).toBe(loaded.exercise.revision + 1);
+      await rm(exercisePath);
+      await rm(keyPath);
+      expect((await loadCases(casesPath)).size).toBe(0);
       db.close();
       db = openDatabase(path);
-      for (const id of ids) {
+      for (const id of [saved.id, ...ids]) {
         expect(getLearningAttempt(db, id).results!.lessons).toEqual(
           loaded.answerKey.issues,
         );
@@ -169,6 +210,24 @@ describe('immutable submission and assessment history', () => {
         });
         expect(retryAssessment(db, id)).toBeTruthy();
       }
+      expect(getAttempt(db, saved.id)).toMatchObject({
+        state: 'submitted',
+        exercise: loaded.exercise,
+        comments: [note],
+      });
+      expect(getReference(db, saved.id)).toEqual({
+        exercise: loaded.exercise,
+        key: loaded.answerKey,
+      });
+      expect(getRuns(db, saved.id)[2]).toEqual(success);
+      completeRun(db, getRuns(db, saved.id)[0].id, feedback);
+      expect(getRuns(db, saved.id).map((run) => run.status)).toEqual([
+        'succeeded',
+        'failed',
+        'succeeded',
+      ]);
+      expect(getRuns(db, saved.id)[0].summary).toEqual(success.summary);
+      expect(getRuns(db, saved.id)[2]).toEqual(success);
     } finally {
       db.close();
       const target = resolve(directory);

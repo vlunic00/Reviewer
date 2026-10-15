@@ -51,9 +51,11 @@ const server = createServer(async (request, response) => {
     .map((candidate: { id: string }, index: number) => ({
       matchedIssueId: candidate.id,
       status:
-        index > 0 && /partial/.test(comment.body) ? 'uncertain' : 'supported',
+        mode === 'uncertain' || (index > 0 && /partial/.test(comment.body))
+          ? 'uncertain'
+          : 'supported',
       feedback:
-        index > 0 && /partial/.test(comment.body)
+        mode === 'uncertain' || (index > 0 && /partial/.test(comment.body))
           ? 'Clarify how the return value hides a failed operation. More evidence is needed.'
           : 'You recognized the underlying failure. Trace the input through every consumer and compare the saved correction.',
     }));
