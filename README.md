@@ -1,6 +1,6 @@
 # Code Review Trainer
 
-A free, local app for learning code-review reasoning. Phases 1–4 are implemented: a complete initial exercise library, a GitHub-style diff workspace, persistent drafts, optional local AI feedback, and complete worked reference lessons.
+A free, local app for learning code-review reasoning. Phases 1–5 are implemented: a complete initial exercise library, a GitHub-style diff workspace, persistent drafts, optional local AI feedback, complete worked reference lessons, and tested recovery and keyboard flows.
 
 Library cards offer **Start review**, **Continue review**, **Read lessons** after submission, and **Retry exercise**. Review history reopens earlier snapshots even if a case has been removed. Answer keys and worked lessons stay private during a draft review; there are no numeric grades.
 
@@ -50,9 +50,13 @@ npm.cmd test
 npm.cmd run typecheck
 npm.cmd exec playwright install chromium
 npm.cmd run test:e2e
+npm.cmd run build
+npm.cmd run test:production
 ```
 
-Case validation and unit/API tests need no installed AI or internet connection. Browser tests start their own development server on ports **3199 / 5199**, an in-memory database, and a test-only Ollama protocol server on **11535**. They cannot write to your progress or call your configured model. The 38 unit/API tests and 21 browser tests cover all 12 combinations, private-key isolation, old/new/context ranges, complete versions, edits, recovery, submission, distinct issue counts, multi-finding comments, invalid AI output, retries/history, snapshot preservation, offline lessons, keyboard controls, and narrow layouts. They also open every exercise and verify its complete lessons. Screenshots are written to the gitignored `test-results` directory.
+Case validation and unit/API tests need no installed AI or internet connection. Browser tests start their own development server on ports **3199 / 5199**, an in-memory database, and a test-only Ollama protocol server on **11535**. They cannot write to your progress or call your configured model. The **46 unit/API tests and 28 browser tests** cover all 12 combinations, private-key isolation, old/new/context ranges, complete versions, edits, save failures, submission, distinct issue counts, multi-finding comments, invalid AI output, retries/history, offline lessons, keyboard focus, and narrow layouts. They also open every exercise and verify its complete lessons. Restart tests edit and delete actual case files, then reopen SQLite and reassess the saved snapshots. Screenshots are written to the gitignored `test-results` directory.
+
+Run `test:production` after `build`. It starts the compiled server on **3299** with an in-memory database and checks bundled local assets, private-file routes, origin validation, immutable submission, and complete offline lessons. It ignores `.env` and uses no model. Keep the test ports free; tests do not reuse an existing application server. Browser coverage uses Chromium; other browsers and a manual screen-reader audit have not been checked.
 
 For explicit authoring-time checks of trusted sample code, run `npm.cmd run check:examples`. This uses the installed TypeScript compiler, Python 3.11+, C++17 compiler, and Rust toolchain; missing tools are clearly reported as skipped. Use a Visual Studio developer shell for `cl` on Windows. The Phase 4 run checked all 36 before/after/corrected source versions and 24 behavior-fixture runs. See [the authoring guide](CASE_AUTHORING.md#validation-and-examples) for setup and the limits of testing intentional undefined behavior and concurrency failures. This command is separate from the app and ordinary tests; review code is never executed at runtime.
 
@@ -62,9 +66,9 @@ For explicit authoring-time checks of trusted sample code, run `npm.cmd run chec
 2. Read the commit message and review context. Switch files using the file list.
 3. Click an old or new line number to open an inline note. **Shift-click** a second line on the same side to select a contiguous range, or adjust its start/end fields. Keyboard users can focus a line number and press Enter; Shift+Enter extends a range.
 4. Write your reasoning and choose **Add comment**. Existing comments can be edited or deleted. Comments save automatically, and **Save draft** saves immediately.
-5. Switch between unified and side-by-side diffs, expand context, or inspect a complete original/updated file. Context files are clearly labeled; empty files have no commentable lines. Long code scrolls inside the viewer.
+5. Switch between unified and side-by-side diffs, expand context, or inspect a complete original/updated file. Context files are clearly labeled; empty files have no commentable lines. Long code scrolls inside the viewer, which can receive keyboard focus. Commented and selected ranges stay visible when surrounding context is collapsed.
 6. Return to the library or reload to resume later, or choose **Finish review** when you are ready to learn from the references. Add or cancel any open note first. The app finishes pending saves and locks the saved version before requesting AI feedback. Completion does not depend on finding issues or having a working model.
-7. Read the brief found/missed summary, then the **missed lessons first**, followed by reinforcing lessons for found issues. Each lesson includes the failure mechanism, concrete example, impact, correction, prevention, key concepts, and common confusions. Location buttons open the saved old/new code with the relevant lines highlighted.
+7. Read the brief found/missed summary, then the **missed lessons first**, followed by reinforcing lessons for found issues. Each lesson includes the failure mechanism, concrete example, impact, correction, prevention, key concepts, and common confusions. Location buttons open the saved old/new code with the relevant lines highlighted. **Back to lessons** restores focus to the location button and preserves expanded lesson sections.
 8. If AI feedback is unavailable, all reference lessons remain readable for self-review. Nonempty reviews show automatic counts as unavailable until a complete assessment succeeds; an empty review immediately shows zero found and all reference issues to learn from, without inference. Choose **Retry AI feedback** later. Earlier successful feedback survives a failed retry, and feedback history lets you revisit successful runs.
 
 One comment may identify several issues. A reference issue is found if any matched finding is supported; repeated findings add no count. Unsupported/uncertain matches remain missed, with uncertainty labeled **Not yet verified**. Extra findings are labeled **AI-assessed, outside the reference key** and never change reference counts. Candidate selection uses authored file/side locations, overlapping ranges or a maximum five-line gap; explicitly authored alternative locations support related files and removed code. Each request includes one comment, requirements, nearby source (bounded to 80 lines / 16,000 characters for long selections), and compact candidate reasoning. The model assesses submitted claims rather than searching the commit for new defects.
@@ -108,6 +112,8 @@ Follow [CASE_AUTHORING.md](CASE_AUTHORING.md) for the offline Codex workflow, pe
 ## Local data and boundaries
 
 The server initializes **`data/app.sqlite`** on first launch, using Node's built-in SQLite module. Node 24 may print an experimental SQLite API warning. This avoids a separate database service and native npm database bindings. The database and `.env` are gitignored; retain the database when updating the app. Schema version 3 adds assessment runs and per-comment findings to the existing comments/save-version tables. Version-1 and version-2 databases migrate without replacing attempts or snapshots. Run one application server per progress database; opening it recovers interrupted jobs from the previous process.
+
+To back up progress, stop the application normally before copying the SQLite file. Keep that backup private: it contains review comments and the saved reference lessons for every attempt, including drafts. Restore it to `SQLITE_PATH` while the application is stopped.
 
 Only explicit public exercise fields are returned by the browsing API. Raw case folders, answer-key files, and the SQLite database are never served. The Vite filesystem allowlist includes frontend/shared source and dependencies, excluding `data`. Foreign Host/Origin headers are rejected; no permissive CORS is enabled.
 

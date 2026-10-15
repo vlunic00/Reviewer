@@ -29,7 +29,7 @@ Build a polished learning tool. Success means the learner understands the mistak
 | Schema validation | Zod (shared TypeScript schemas) |
 | Storage | Local JSON exercise files; SQLite for attempts/progress |
 | Local AI | Ollama HTTP API, with configurable small Qwen model |
-| Testing | Vitest, React Testing Library, and Playwright for critical UI flows |
+| Testing | Vitest for unit/API tests; Playwright for critical UI flows |
 
 Use the stack above and avoid unnecessary frameworks or services. Build on `react-diff-view` widgets and source-text utilities rather than writing a diff renderer. See the [library documentation](https://github.com/otakustay/react-diff-view).
 
@@ -578,6 +578,8 @@ Provide straightforward commands for install, development, case validation, test
 - Test save failures, repeated submission/reassessment requests, interrupted assessment, and failed reassessment preserving earlier successful feedback/counts. Edit/remove source cases and verify historical views and reassessment still use the saved lesson snapshots.
 - Keep model-accuracy benchmarking and the 30+ manually labeled fixtures as post-MVP follow-up work, not release gates.
 - Improve accessibility, loading and error states, long code files, and README instructions.
+
+**Status:** implemented. All 12 cases validate; 46 unit/API tests and 28 Chromium browser tests cover the critical deterministic behavior, full lessons, offline access, failures, and retries. Disk-backed restart tests preserve original snapshots and successful feedback after source files are edited/deleted and a retry is interrupted. Feedback-history tests switch between successful runs without mixing their findings/counts. Slow feedback polling now allows requests to finish; range selection reveals complete hidden ranges without expanding unrelated code. Keyboard focus follows editing, deletion, submission, library navigation, and code inspection while preserving expanded lessons. Loading/error views retain a skip target; code regions and corrected snippets have keyboard access. Development filesystem checks and markup-as-text tests protect the private-data/display boundaries; `npm run test:production` checks the compiled server, local assets, origin restrictions, immutable submissions, and lessons without Ollama. See `README.md` for commands and isolated test ports. Real-model benchmarking, other-browser checks, and a manual screen-reader audit remain follow-up work; deterministic tests do not establish model accuracy.
 
 ---
 
