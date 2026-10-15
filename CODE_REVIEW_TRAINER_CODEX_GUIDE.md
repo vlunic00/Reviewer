@@ -326,6 +326,8 @@ Provide a CLI validator such as `npm run validate:cases` that runs without AI or
 
 A comment may correctly refer to an issue a few lines away, to removed code, or to a separate related file; candidate matching must allow the explicitly documented valid locations and reasonable proximity rather than requiring an exact line overlap.
 
+The Phase 3 implementation uses overlapping ranges or a maximum five-line gap on the same file and side. Related files or alternative old/new locations must be authored explicitly in `locations`. Requests assess one comment at a time and include up to 80 nearby/selected source lines, bounded to 16,000 characters for long selections, plus requirements and compact candidate reasoning. If that context cannot establish an extra claim, return `uncertain`.
+
 For a user-reported finding that does not match a candidate, ask the model to assess that specific claim against the supplied code and requirements. Return its verdict and explanation even when the reference key is incomplete. If context is insufficient, use `uncertain`; never ask the model to invent extra findings or independently discover bugs in the whole commit. Model accuracy calibration is follow-up work, not an MVP release gate.
 
 ### 5.2 Local AI provider
@@ -472,6 +474,8 @@ Keep the SQLite file in a gitignored local data directory. Snapshots include the
 | `GET /api/attempts/:id` | Returns the public snapshot and draft comments for Continue, or immutable comments, complete reference lessons, assessment history, found/missed counts when available, and per-comment `findings[]` feedback after submission |
 | `GET /api/system/grader` | Reports local Ollama/model availability and configuration for AI feedback |
 
+The implemented submission body is `{ "version": 1 }`, using the last acknowledged draft-save version. A stale version returns 409 before locking. Retry feedback accepts `{}`. Both mutations return HTTP 202 with the submitted attempt; poll its GET endpoint while feedback is pending/running. Submitted `results` includes `lessons` and newest-first `runs`; draft responses omit it entirely.
+
 Keep the existing planned HTTP route paths, including `/regrade` and `/api/system/grader`, as technical names; the product action is **Retry AI feedback**, and payloads contain explanations and issue counts rather than grades. Reference findings and worked lessons should be returned **only for submitted attempts** through a results-specific payload, without waiting for successful inference. Validate filters, IDs, and comment anchors; do not expose arbitrary filesystem paths or raw answer-key endpoints.
 
 ### Local-only serving
@@ -528,7 +532,7 @@ Provide straightforward commands for install, development, case validation, test
 
 **Done when:** the user can select any of the four languages and any difficulty and see the correctly filtered library or a helpful empty state.
 
-**Status:** implemented with four starter cases, public exercise previews, and all 12 filter combinations. Phase 2 added the worked-lesson validation/content and persistent draft review workspace. See `README.md` for run/check commands. AI assessment and submitted learning feedback remain in Phase 3; complete 12-case coverage remains in Phase 4.
+**Status:** implemented with four starter cases, public exercise previews, and all 12 filter combinations. Phase 2 added the worked-lesson validation/content and persistent draft review workspace; Phase 3 added submission and learning feedback. See `README.md` for run/check commands. Complete 12-case coverage remains in Phase 4.
 
 ### Phase 2 — GitHub-style code review
 
@@ -540,7 +544,7 @@ Provide straightforward commands for install, development, case validation, test
 
 **Done when:** a reviewer can annotate added, deleted, and unchanged code across several files, switch views, reload, and retain accurate anchors.
 
-**Status:** implemented. Start/Continue opens a snapshot-backed workspace with old/new/context range comments, editing/deletion, unified/split views, complete file versions, context expansion, per-language highlighting, serialized autosave, visible save errors, stale-tab protection, and tab-local recovery of unfinished notes. SQLite schema version 2 preserves version-1 attempts/snapshots. Submission and learning-feedback results remain Phase 3 work.
+**Status:** implemented. Start/Continue opens a snapshot-backed workspace with old/new/context range comments, editing/deletion, unified/split views, complete file versions, context expansion, per-language highlighting, serialized autosave, visible save errors, stale-tab protection, and tab-local recovery of unfinished notes. SQLite schema version 3 retains the Phase 2 comment/save-version tables and preserves earlier attempts/snapshots.
 
 ### Phase 3 — Offline assessment and learning feedback
 
@@ -551,6 +555,8 @@ Provide straightforward commands for install, development, case validation, test
 - Transactionally lock submissions, save assessment history, prevent duplicate jobs, and make interrupted assessment retryable without losing earlier feedback or changing lesson snapshots.
 
 **Done when:** a learner can understand the causes, consequences, corrections, and prevention of every reference mistake, especially those missed. Multiple known findings in one comment count correctly, extra findings receive separate feedback, and missing/interrupted AI assessment preserves submissions, prior feedback, and access to all saved lessons.
+
+**Status:** implemented. Finish review waits for saves and transactionally submits the acknowledged draft version. Native local Ollama requests use schema constraints, model thinking metadata, configurable timeouts, one invalid-output retry, and serial inference. Results show missed lessons first, complete reinforcing lessons, distinct counts when available, separately labeled extra findings, old/new code links, offline self-review, setup checks, feedback retries/history, and review history. SQLite version 3 stores complete validated runs and recovers interrupted jobs. Deterministic tests cover these flows and failure/recovery paths. No installed Ollama server was available for a real-model run; accuracy calibration remains follow-up work.
 
 ### Phase 4 — Complete language/difficulty exercise coverage
 
