@@ -282,6 +282,13 @@ export const attemptSummarySchema = z.strictObject({
   summary: issueCountsSchema.nullable(),
 });
 export type AttemptSummary = z.infer<typeof attemptSummarySchema>;
+export const graderStatusSchema = z.strictObject({
+  available: z.boolean(),
+  model: z.string(),
+  url: z.string(),
+  timeoutMs: z.number().int().positive(),
+  error: z.string().nullable(),
+});
 export const attemptSchema = z.strictObject({
   id: z.uuid(),
   state: z.enum(['draft', 'submitted']),
