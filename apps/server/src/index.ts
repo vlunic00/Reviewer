@@ -27,6 +27,7 @@ export async function startServer(development = false) {
   const origins = [`http://127.0.0.1:${port}`];
   if (development) origins.push(`http://127.0.0.1:${webPort}`);
   const app = createApp(cases, database, origins);
+  const stopAssessments = () => app.locals.assessments.stop();
   if (!development) {
     const webDirectory = resolve('dist/web');
     if (!existsSync(resolve(webDirectory, 'index.html'))) {
@@ -48,19 +49,21 @@ export async function startServer(development = false) {
     throw error;
   }
   console.log(`API ready: http://127.0.0.1:${port} (${cases.size} exercises)`);
-  return { server, database };
+  return { server, database, stopAssessments };
 }
 
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
-  const { server, database } = await startServer();
-  const stop = () =>
+  const { server, database, stopAssessments } = await startServer();
+  const stop = () => {
+    stopAssessments();
     server.close(() => {
       database.close();
       process.exit(0);
     });
+  };
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
 }

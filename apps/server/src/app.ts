@@ -10,19 +10,23 @@ import {
 } from '../../../packages/shared/src/index.js';
 import type { LoadedCase } from './cases.js';
 import { getProgress } from './database.js';
+import { AttemptError, createAttempt, saveComments } from './attempts.js';
+import { AssessmentService } from './assessment-service.js';
 import {
-  AttemptError,
-  createAttempt,
-  getAttempt,
-  saveComments,
-} from './attempts.js';
+  getLearningAttempt,
+  listAttempts,
+  retryAssessment,
+  submitAttempt,
+} from './assessment-store.js';
 
 export function createApp(
   cases: Map<string, LoadedCase>,
   database: DatabaseSync,
   allowedOrigins: string[],
+  assessments = new AssessmentService(database),
 ) {
   const app = express();
+  app.locals.assessments = assessments;
   app.disable('x-powered-by');
   const hosts = new Set(allowedOrigins.map((origin) => new URL(origin).host));
   app.use((request, response, next) => {
@@ -71,6 +75,14 @@ export function createApp(
     const drafts = new Map(
       draftRows.map((row) => [String(row.exercise_id), String(row.id)]),
     );
+    const submitted = new Map(
+      database
+        .prepare(
+          "SELECT id, exercise_id FROM attempts WHERE state = 'submitted' ORDER BY submitted_at, rowid",
+        )
+        .all()
+        .map((row) => [String(row.exercise_id), String(row.id)]),
+    );
     const summaries = [...cases.values()]
       .filter(
         ({ exercise }) =>
@@ -90,6 +102,7 @@ export function createApp(
           ).length,
           status: progress.get(exercise.id) ?? 'not_started',
           draftAttemptId: drafts.get(exercise.id) ?? null,
+          latestAttemptId: submitted.get(exercise.id) ?? null,
         }),
       )
       .sort((left, right) => left.id.localeCompare(right.id));
@@ -116,14 +129,37 @@ export function createApp(
     if (!loaded) throw new AttemptError(404, 'Exercise not found.');
     response.status(201).json(createAttempt(database, loaded));
   });
+  app.get('/api/attempts', (_request, response) =>
+    response.json(listAttempts(database)),
+  );
   app.get('/api/attempts/:id', (request, response) => {
-    response.json(getAttempt(database, z.uuid().parse(request.params.id)));
+    response.json(
+      getLearningAttempt(database, z.uuid().parse(request.params.id)),
+    );
   });
   app.put('/api/attempts/:id/comments', (request, response) => {
     response.json(
       saveComments(database, z.uuid().parse(request.params.id), request.body),
     );
   });
+  app.post('/api/attempts/:id/submit', (request, response) => {
+    const id = z.uuid().parse(request.params.id);
+    const { version } = z
+      .strictObject({ version: z.number().int().nonnegative() })
+      .parse(request.body);
+    const runId = submitAttempt(database, id, version);
+    assessments.enqueue(runId);
+    response.status(202).json(getLearningAttempt(database, id));
+  });
+  app.post('/api/attempts/:id/regrade', (request, response) => {
+    const id = z.uuid().parse(request.params.id);
+    z.strictObject({}).parse(request.body);
+    assessments.enqueue(retryAssessment(database, id));
+    response.status(202).json(getLearningAttempt(database, id));
+  });
+  app.get('/api/system/grader', async (_request, response) =>
+    response.json(await assessments.provider.status()),
+  );
   app.use('/api', (_request, response) =>
     response.status(404).json({ error: 'API route not found.' }),
   );
@@ -141,12 +177,9 @@ export function createApp(
       error instanceof z.ZodError ||
       (error instanceof SyntaxError && 'body' in error)
     ) {
-      response
-        .status(400)
-        .json({
-          error:
-            'Invalid request data. Check the comment fields and line range.',
-        });
+      response.status(400).json({
+        error: 'Invalid request data. Check the comment fields and line range.',
+      });
       return;
     }
     if (error?.type === 'entity.too.large') {

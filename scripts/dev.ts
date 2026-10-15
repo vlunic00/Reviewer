@@ -14,6 +14,7 @@ try {
   await vite.close();
   if (backend) {
     const running = backend;
+    running.stopAssessments();
     await new Promise<void>((done) => running.server.close(() => done()));
     running.database.close();
   }
@@ -23,6 +24,7 @@ async function stop() {
   await vite.close();
   if (backend) {
     const running = backend;
+    running.stopAssessments();
     await new Promise<void>((done) => running.server.close(() => done()));
     running.database.close();
   }
