@@ -390,11 +390,12 @@ function ReviewDraft({
       }
       onSubmitted(submitted);
     } catch (error) {
-      setSubmissionUnconfirmed(!(error instanceof ApiError));
+      const unconfirmed = !(error instanceof ApiError) || error.status >= 500;
+      setSubmissionUnconfirmed(unconfirmed);
       setSubmissionError(
-        error instanceof ApiError
-          ? error.message
-          : 'Submission could not be confirmed. Editing is paused; choose Finish review again to safely retry. Your comments have been kept.',
+        unconfirmed
+          ? 'Submission could not be confirmed. Editing is paused; choose Finish review again to safely retry. Your comments have been kept.'
+          : error.message,
       );
       if (error instanceof ApiError && error.status === 409) {
         setConflict(true);

@@ -6,11 +6,12 @@ import type { DatabaseSync } from 'node:sqlite';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../apps/server/src/app.js';
 import { AssessmentService } from '../apps/server/src/assessment-service.js';
-import { loadCases } from '../apps/server/src/cases.js';
+import { loadCases, type LoadedCase } from '../apps/server/src/cases.js';
 import { openDatabase } from '../apps/server/src/database.js';
 import type { CommentAssessment } from '../packages/shared/src/index.js';
 
 let database: DatabaseSync;
+let cases: Map<string, LoadedCase>;
 let server: Server;
 let base: string;
 let service: AssessmentService;
@@ -23,7 +24,7 @@ const gate = new Promise<void>((done) => {
   release = done;
 });
 beforeAll(async () => {
-  const cases = await loadCases(resolve('data/cases'));
+  cases = await loadCases(resolve('data/cases'));
   database = openDatabase(':memory:');
   service = new AssessmentService(database, {
     model: 'test-local',
@@ -196,5 +197,49 @@ describe('feedback API and serial inference', () => {
       (await post(`/api/attempts/${id}/submit`, { version: 0 })).status,
     ).toBe(409);
     expect((await get(`/api/attempts/${id}`)).state).toBe('draft');
+  });
+
+  it('submits, reads lessons, retries feedback and lists history after the live case changes or disappears', async () => {
+    failed = false;
+    const original = cases.get('py-medium-001')!;
+    const id = await draft();
+    try {
+      const edited = structuredClone(original);
+      edited.exercise.revision++;
+      edited.answerKey.revision++;
+      edited.answerKey.issues[0].explanation =
+        'A changed lesson for future reviews.';
+      cases.set(original.exercise.id, edited);
+      expect((await get(`/api/cases/${original.exercise.id}`)).revision).toBe(
+        3,
+      );
+      await post(`/api/attempts/${id}/submit`, { version: 1 });
+      await vi.waitFor(async () =>
+        expect((await get(`/api/attempts/${id}`)).results.runs[0].status).toBe(
+          'succeeded',
+        ),
+      );
+      cases.delete(original.exercise.id);
+      expect(
+        (await fetch(`${base}/api/cases/${original.exercise.id}`)).status,
+      ).toBe(404);
+      await post(`/api/attempts/${id}/regrade`);
+      await vi.waitFor(async () =>
+        expect((await get(`/api/attempts/${id}`)).results.runs[0].status).toBe(
+          'succeeded',
+        ),
+      );
+      const historical = await get(`/api/attempts/${id}`);
+      expect(historical.exercise).toEqual(original.exercise);
+      expect(historical.results.lessons).toEqual(original.answerKey.issues);
+      expect(historical.results.runs).toHaveLength(2);
+      expect(
+        (await get('/api/attempts')).find(
+          (attempt: { id: string }) => attempt.id === id,
+        ),
+      ).toMatchObject({ revision: 2, state: 'submitted' });
+    } finally {
+      cases.set(original.exercise.id, original);
+    }
   });
 });

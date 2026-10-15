@@ -297,29 +297,75 @@ test('unfinished notes and failed saves cannot be submitted', async ({
   ).toBeVisible();
 });
 
-test('a lost submission response can be retried without duplicate jobs or editing the locked review', async ({
+for (const failure of ['lost', 'server error'])
+  test(`a ${failure} submission response can be retried without duplicate jobs or editing the locked review`, async ({
+    page,
+  }) => {
+    const attempt = await open(page);
+    await note(page, 'both: Iterator and failure paths.');
+    await page.route(`**/api/attempts/${attempt.id}/submit`, async (route) => {
+      await route.fetch();
+      if (failure === 'lost') await route.abort();
+      else
+        await route.fulfill({
+          status: 503,
+          json: { error: 'Response unavailable.' },
+        });
+    });
+    await finish(page);
+    await expect(page.getByRole('alert')).toContainText(
+      'Submission could not be confirmed',
+    );
+    await expect(
+      page.getByRole('button', { name: 'Comment on new line 9', exact: true }),
+    ).toBeDisabled();
+    await page.unroute(`**/api/attempts/${attempt.id}/submit`);
+    await finish(page);
+    await expect(
+      page.getByText('2 found · 0 missed', { exact: true }).first(),
+    ).toBeVisible();
+    const saved = await (
+      await page.request.get(`/api/attempts/${attempt.id}`)
+    ).json();
+    expect(saved.results.runs).toHaveLength(1);
+  });
+
+test('a nonempty offline submission keeps counts unavailable and lessons readable', async ({
   page,
 }) => {
+  await mode('offline');
   const attempt = await open(page);
-  await note(page, 'both: Iterator and failure paths.');
-  await page.route(`**/api/attempts/${attempt.id}/submit`, async (route) => {
-    await route.fetch();
-    await route.abort();
-  });
+  await note(page, 'Counting exhausts the iterator.');
   await finish(page);
+  await expect(
+    page.getByText('Automatic found/missed counts unavailable.', {
+      exact: true,
+    }),
+  ).toBeVisible();
   await expect(page.getByRole('alert')).toContainText(
-    'Submission could not be confirmed',
+    'AI feedback unavailable',
   );
   await expect(
-    page.getByRole('button', { name: 'Comment on new line 9', exact: true }),
-  ).toBeDisabled();
-  await page.unroute(`**/api/attempts/${attempt.id}/submit`);
-  await finish(page);
+    page
+      .getByRole('region', {
+        name: 'Reference lessons for self-review',
+        exact: true,
+      })
+      .locator('pre code'),
+  ).toHaveCount(2);
   await expect(
-    page.getByText('2 found · 0 missed', { exact: true }).first(),
+    page.getByRole('heading', { name: /^Missed issues/ }),
+  ).toHaveCount(0);
+  await page.reload();
+  await expect(
+    page.getByText('Automatic found/missed counts unavailable.', {
+      exact: true,
+    }),
   ).toBeVisible();
   const saved = await (
     await page.request.get(`/api/attempts/${attempt.id}`)
   ).json();
-  expect(saved.results.runs).toHaveLength(1);
+  expect(saved.state).toBe('submitted');
+  expect(saved.comments).toHaveLength(1);
+  expect(saved.results.runs[0].summary).toBeNull();
 });
