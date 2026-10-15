@@ -201,6 +201,7 @@ export const caseSummarySchema = z.strictObject({
   changedFileCount: z.number().int().nonnegative(),
   status: z.enum(['not_started', 'in_progress', 'completed']),
   draftAttemptId: z.string().min(1).nullable().optional(),
+  latestAttemptId: z.uuid().nullable().optional(),
 });
 export type CaseSummary = z.infer<typeof caseSummarySchema>;
 
@@ -227,6 +228,60 @@ export const saveCommentsSchema = z.strictObject({
   version: z.number().int().nonnegative(),
   comments: commentsSchema,
 });
+
+export const commentAssessmentSchema = z.strictObject({
+  commentId: z.uuid(),
+  findings: z
+    .array(
+      z.strictObject({
+        matchedIssueId: caseIdSchema.nullable(),
+        status: z.enum(['supported', 'unsupported', 'uncertain']),
+        feedback: textSchema.max(8000),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+export type CommentAssessment = z.infer<typeof commentAssessmentSchema>;
+export const issueCountsSchema = z.strictObject({
+  foundIssueIds: z.array(caseIdSchema),
+  foundCount: z.number().int().nonnegative(),
+  missedCount: z.number().int().nonnegative(),
+});
+export const assessmentRunSchema = z.strictObject({
+  id: z.uuid(),
+  status: z.enum(['pending', 'running', 'succeeded', 'failed']),
+  mode: z.enum(['AI-assisted', 'Self-review']),
+  model: z.string().nullable(),
+  digest: z.string().nullable(),
+  promptVersion: textSchema,
+  assessmentVersion: textSchema,
+  createdAt: z.string(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+  summary: issueCountsSchema.nullable(),
+  assessments: z.array(commentAssessmentSchema),
+  error: z.string().nullable(),
+});
+export type AssessmentRun = z.infer<typeof assessmentRunSchema>;
+export const learningResultsSchema = z.strictObject({
+  lessons: z.array(issueSchema).min(1),
+  runs: z.array(assessmentRunSchema),
+});
+export const attemptSummarySchema = z.strictObject({
+  id: z.uuid(),
+  exerciseId: caseIdSchema,
+  title: textSchema,
+  language: languageSchema,
+  difficulty: difficultySchema,
+  revision: z.number().int().positive(),
+  state: z.enum(['draft', 'submitted']),
+  startedAt: z.string(),
+  submittedAt: z.string().nullable(),
+  latestStatus: assessmentRunSchema.shape.status.nullable(),
+  summary: issueCountsSchema.nullable(),
+});
+export type AttemptSummary = z.infer<typeof attemptSummarySchema>;
 export const attemptSchema = z.strictObject({
   id: z.uuid(),
   state: z.enum(['draft', 'submitted']),
@@ -235,5 +290,6 @@ export const attemptSchema = z.strictObject({
   exercise: exerciseSchema,
   comments: commentsSchema,
   diffs: z.record(filePathSchema, z.string()),
+  results: learningResultsSchema.optional(),
 });
 export type ReviewAttempt = z.infer<typeof attemptSchema>;
