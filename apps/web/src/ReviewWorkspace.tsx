@@ -13,6 +13,7 @@ import {
 } from '../../../packages/shared/src/index.js';
 import { ApiError, fetchJson } from './api.js';
 import { FileDiff } from './FileDiff.js';
+import { LearningResults } from './LearningResults.js';
 
 const editorSchema = z.strictObject({
   id: z.uuid().optional(),
@@ -59,8 +60,43 @@ export function ReviewWorkspace({
       });
     return () => controller.abort();
   }, [id, retry]);
+  const active = attempt?.results?.runs.some(
+    (run) => run.status === 'pending' || run.status === 'running',
+  );
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setTimeout(() => setRetry((value) => value + 1), 1200);
+    return () => window.clearTimeout(timer);
+  }, [active, retry]);
   return attempt ? (
-    <ReviewDraft key={id} attempt={attempt} onBack={onBack} />
+    attempt.state === 'submitted' && attempt.results ? (
+      <>
+        {error && (
+          <p role="alert" className="save-error">
+            Feedback updates could not be loaded. Your saved lessons remain
+            available.
+            <button
+              className="secondary-button"
+              onClick={() => setRetry((value) => value + 1)}
+            >
+              Refresh feedback
+            </button>
+          </p>
+        )}
+        <LearningResults
+          attempt={attempt}
+          onBack={onBack}
+          onUpdate={setAttempt}
+        />
+      </>
+    ) : (
+      <ReviewDraft
+        key={id}
+        attempt={attempt}
+        onBack={onBack}
+        onSubmitted={setAttempt}
+      />
+    )
   ) : (
     <main className="review-workspace">
       <button className="secondary-button" onClick={onBack}>
@@ -86,9 +122,11 @@ export function ReviewWorkspace({
 function ReviewDraft({
   attempt,
   onBack,
+  onSubmitted,
 }: {
   attempt: ReviewAttempt;
   onBack: () => void;
+  onSubmitted: (attempt: ReviewAttempt) => void;
 }) {
   const key = `review-draft:${attempt.id}`;
   const [restored] = useState(() => {
@@ -137,6 +175,10 @@ function ReviewDraft({
   const [conflict, setConflict] = useState(Boolean(conflictOnLoad));
   const [backupWarning, setBackupWarning] = useState(restored.warning);
   const [editorError, setEditorError] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
+  const [submissionUnconfirmed, setSubmissionUnconfirmed] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string>();
+  const submissionInFlight = useRef(false);
   const [saveState, setSaveState] = useState<
     'saved' | 'unsaved' | 'saving' | 'error'
   >(
@@ -155,7 +197,8 @@ function ReviewDraft({
   const inFlight = useRef<Promise<boolean> | undefined>(undefined);
   current.current = comments;
   currentEditor.current = editor;
-  const readOnly = attempt.state !== 'draft';
+  const readOnly =
+    attempt.state !== 'draft' || submitting || submissionUnconfirmed;
   const file = attempt.exercise.files.find(
     (candidate) => candidate.path === filePath,
   )!;
@@ -318,6 +361,52 @@ function ReviewDraft({
       onBack();
     }
   }
+  async function submit() {
+    if (submissionInFlight.current || conflict) return;
+    if (currentEditor.current) {
+      setSubmissionError(
+        'Add or cancel your open note before finishing the review.',
+      );
+      return;
+    }
+    submissionInFlight.current = true;
+    setSubmitting(true);
+    setSubmissionError(undefined);
+    try {
+      if (!(await save())) return;
+      const submitted = attemptSchema.parse(
+        await fetchJson(`/api/attempts/${attempt.id}/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ version: version.current }),
+        }),
+      );
+      if (submitted.state !== 'submitted')
+        throw new Error('Submission was not confirmed.');
+      try {
+        sessionStorage.removeItem(key);
+      } catch {
+        /* Saved submission is durable. */
+      }
+      onSubmitted(submitted);
+    } catch (error) {
+      setSubmissionUnconfirmed(!(error instanceof ApiError));
+      setSubmissionError(
+        error instanceof ApiError
+          ? error.message
+          : 'Submission could not be confirmed. Editing is paused; choose Finish review again to safely retry. Your comments have been kept.',
+      );
+      if (error instanceof ApiError && error.status === 409) {
+        setConflict(true);
+        setError(
+          'The saved review changed. Copy any pending notes, then load the saved review before finishing.',
+        );
+      }
+    } finally {
+      submissionInFlight.current = false;
+      setSubmitting(false);
+    }
+  }
   function loadSaved() {
     if (
       !window.confirm(
@@ -411,7 +500,11 @@ function ReviewDraft({
 
   return (
     <main className="review-workspace" id="review" tabIndex={-1}>
-      <button className="secondary-button" onClick={() => void back()}>
+      <button
+        className="secondary-button"
+        disabled={submitting}
+        onClick={() => void back()}
+      >
         ← Back to library
       </button>
       <div className="review-heading">
@@ -456,8 +549,26 @@ function ReviewDraft({
               Save draft
             </button>
           )}
+          {attempt.state === 'draft' && (
+            <button
+              className="primary-button"
+              disabled={submitting || conflict}
+              onClick={() => void submit()}
+            >
+              {submitting ? 'Finishing review…' : 'Finish review'}
+            </button>
+          )}
         </div>
       </div>
+      <p className="submission-help">
+        Finish when you are ready to study the reference lessons. Submitted
+        comments cannot be edited.
+      </p>
+      {submissionError && (
+        <p className="save-error" role="alert">
+          {submissionError}
+        </p>
+      )}
       {attempt.exercise.reviewContext && (
         <details className="review-context" open>
           <summary>Review context</summary>

@@ -15,6 +15,7 @@ import {
 } from '../../../packages/shared/src/index.js';
 import { fetchJson } from './api.js';
 import { ReviewWorkspace } from './ReviewWorkspace.js';
+import { AttemptHistory } from './AttemptHistory.js';
 
 const languageMarks: Record<Language, string> = {
   typescript: 'TS',
@@ -208,10 +209,7 @@ export function App() {
             body: JSON.stringify({ exerciseId: exercise.id }),
           }),
         ).id;
-      const url = new URL(window.location.href);
-      url.searchParams.set('attempt', id);
-      window.history.pushState(null, '', url);
-      setAttemptId(id);
+      openAttempt(id);
     } catch {
       setStartError(
         'The review could not be opened. Try again; your saved drafts are unchanged.',
@@ -219,6 +217,12 @@ export function App() {
     } finally {
       setStartingId(undefined);
     }
+  }
+  function openAttempt(id: string) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('attempt', id);
+    window.history.pushState(null, '', url);
+    setAttemptId(id);
   }
   function returnToLibrary() {
     const url = new URL(window.location.href);
@@ -501,17 +505,30 @@ export function App() {
                         </div>
                       </div>
                       <div className="card-actions">
+                        {exercise.latestAttemptId && (
+                          <button
+                            className="secondary-button"
+                            onClick={() =>
+                              openAttempt(exercise.latestAttemptId!)
+                            }
+                            aria-label={`Read lessons: ${exercise.title}`}
+                          >
+                            Read lessons
+                          </button>
+                        )}
                         <button
                           className="primary-button"
                           disabled={Boolean(startingId)}
                           onClick={() => void start(exercise)}
-                          aria-label={`${exercise.draftAttemptId ? 'Continue' : 'Start'} review: ${exercise.title}`}
+                          aria-label={`${exercise.draftAttemptId ? 'Continue review' : exercise.status === 'completed' ? 'Retry exercise' : 'Start review'}: ${exercise.title}`}
                         >
                           {startingId === exercise.id
                             ? 'Opening…'
                             : exercise.draftAttemptId
                               ? 'Continue review'
-                              : 'Start review'}
+                              : exercise.status === 'completed'
+                                ? 'Retry exercise'
+                                : 'Start review'}
                         </button>
                         <button
                           className="preview-button"
@@ -526,6 +543,7 @@ export function App() {
                 </div>
               )}
             </section>
+            <AttemptHistory onOpen={openAttempt} />
             <footer className="page-footer">
               <span>Thoughtful reviews start with good questions.</span>
               <span className="footer-code" aria-hidden="true">

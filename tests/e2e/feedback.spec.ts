@@ -1,0 +1,325 @@
+import { test, expect, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import type { AnswerKey } from '../../packages/shared/src/index.js';
+
+const mode = async (value: string) => {
+  await fetch('http://127.0.0.1:11535/__test/mode', {
+    method: 'POST',
+    body: JSON.stringify({ mode: value }),
+  });
+};
+test.beforeEach(async () => {
+  await mode('normal');
+});
+test.afterEach(async () => {
+  await mode('normal');
+});
+async function open(page: Page) {
+  const attempt = await (
+    await page.request.post('/api/attempts', {
+      data: { exerciseId: 'py-medium-001' },
+    })
+  ).json();
+  await page.goto(`/?language=python&difficulty=medium&attempt=${attempt.id}`);
+  await expect(
+    page.getByRole('heading', { name: 'Stream the row refresh', exact: true }),
+  ).toBeVisible();
+  return attempt;
+}
+async function note(page: Page, body: string, line = 9) {
+  await page
+    .getByRole('button', { name: `Comment on new line ${line}`, exact: true })
+    .click();
+  await page.getByLabel('Review comment', { exact: true }).fill(body);
+  await page.getByRole('button', { name: 'Add comment', exact: true }).click();
+}
+const finish = (page: Page) =>
+  page.getByRole('button', { name: 'Finish review', exact: true }).click();
+
+test('an empty offline review shows every complete lesson, old-side code, completion and saved history', async ({
+  page,
+}) => {
+  await mode('offline');
+  const attempt = await open(page);
+  await finish(page);
+  await expect(
+    page.getByText('0 found · 2 missed', { exact: true }).first(),
+  ).toBeVisible();
+  const key: AnswerKey = JSON.parse(
+    await readFile(
+      'data/cases/python/medium/py-medium-001/answer-key.json',
+      'utf8',
+    ),
+  );
+  for (const lesson of key.issues) {
+    const article = page.getByRole('article', {
+      name: lesson.title,
+      exact: true,
+    });
+    for (const value of [
+      lesson.explanation,
+      lesson.failureExample,
+      lesson.whyItMatters,
+      lesson.suggestedFix,
+      lesson.prevention,
+    ])
+      await expect(article).toContainText(value);
+    await expect(article.locator('pre code')).toHaveText(
+      lesson.correctedCode[0].code,
+    );
+  }
+  expect(
+    (await (await fetch('http://127.0.0.1:11535/__test/count')).json()).chats,
+  ).toBe(0);
+  await page
+    .getByRole('button', {
+      name: 'app/refresh.py · Original lines 11–11',
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByText('Original lines 11–11 are highlighted.', { exact: false }),
+  ).toBeVisible();
+  await expect(page.locator('.diff-code-selected')).toHaveCount(1);
+  await expect(
+    page.getByRole('button', { name: /^Edit comment:/ }),
+  ).toHaveCount(0);
+  await page
+    .getByRole('button', { name: 'Back to lessons', exact: false })
+    .click();
+  await page
+    .getByRole('button', { name: 'Back to library', exact: false })
+    .click();
+  await expect(
+    page.getByRole('article').getByText('Completed', { exact: true }),
+  ).toBeVisible();
+  await page.getByText('Review history', { exact: true }).click();
+  await expect(page.locator('.review-history')).toContainText(
+    '0 found · 2 missed',
+  );
+  await page
+    .getByRole('button', {
+      name: 'Read lessons: Stream the row refresh',
+      exact: true,
+    })
+    .click();
+  await expect(page).toHaveURL(new RegExp(attempt.id));
+  await expect(
+    page.getByRole('heading', { name: 'Missed issues (2)', exact: true }),
+  ).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: 'test-results/learning-lessons-mobile.png',
+    fullPage: true,
+  });
+  await page.screenshot({
+    path: 'test-results/learning-lessons-mobile-top.png',
+  });
+});
+
+test('submission waits for saving, deduplicates findings, and leads with uncertain missed lessons', async ({
+  page,
+}) => {
+  const attempt = await open(page);
+  await note(
+    page,
+    'partial extra: Counting exhausts rows; clarify the failure contract.',
+  );
+  await expect(page.getByRole('status')).toHaveText('All comments saved');
+  let release!: () => void;
+  const gate = new Promise<void>((done) => {
+    release = done;
+  });
+  let saving = false;
+  let submits = 0;
+  page.on('request', (request) => {
+    if (request.url().endsWith('/submit')) submits++;
+  });
+  await page.route(`**/api/attempts/${attempt.id}/comments`, async (route) => {
+    saving = true;
+    await gate;
+    await route.continue();
+  });
+  await note(
+    page,
+    'partial extra: The same iterator is used again; error evidence is incomplete.',
+    10,
+  );
+  await finish(page);
+  await expect.poll(() => saving).toBe(true);
+  expect(submits).toBe(0);
+  await expect(
+    page.getByRole('button', { name: 'Comment on new line 9', exact: true }),
+  ).toBeDisabled();
+  release();
+  await expect(
+    page.getByText('1 found · 1 missed', { exact: true }).first(),
+  ).toBeVisible();
+  await expect(page.locator('.worked-lesson h3')).toHaveText([
+    'Connection failures appear successful',
+    'Logging consumes the iterator',
+  ]);
+  await expect(page.locator('.uncertain-label')).toContainText(
+    'Not yet verified',
+  );
+  await expect(
+    page.getByRole('heading', {
+      name: 'AI-assessed, outside the reference key',
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Extra findings' }),
+  ).toContainText('Uncertain');
+  await page.screenshot({
+    path: 'test-results/learning-feedback-desktop.png',
+    fullPage: true,
+  });
+  await page.screenshot({
+    path: 'test-results/learning-feedback-desktop-top.png',
+  });
+  await page.reload();
+  await expect(
+    page.getByText('1 found · 1 missed', { exact: true }).first(),
+  ).toBeVisible();
+  const saved = await (
+    await page.request.get(`/api/attempts/${attempt.id}`)
+  ).json();
+  expect(saved.comments).toHaveLength(2);
+  expect(saved.results.runs[0].assessments).toHaveLength(2);
+});
+
+test('one comment can find several reference issues and report an extra finding', async ({
+  page,
+}) => {
+  await open(page);
+  await note(
+    page,
+    'both extra: Counting exhausts rows and returning [] hides failure.',
+  );
+  await finish(page);
+  await expect(
+    page.getByText('2 found · 0 missed', { exact: true }).first(),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole('region', { name: 'Found issues', exact: true })
+      .locator('pre code'),
+  ).toHaveCount(2);
+  await expect(
+    page.getByRole('region', { name: 'Extra findings' }),
+  ).toBeVisible();
+});
+
+test('failed assessment and retry preserve lessons, earlier feedback and run history', async ({
+  page,
+}) => {
+  await mode('invalid');
+  const attempt = await open(page);
+  await note(page, 'both: Counting and failure reporting are broken.');
+  await finish(page);
+  await expect(
+    page.getByText('Automatic found/missed counts unavailable.', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('twice');
+  await expect(page.locator('.worked-lesson pre code')).toHaveCount(2);
+  await mode('normal');
+  await page
+    .getByRole('button', { name: 'Retry AI feedback', exact: true })
+    .click();
+  await expect(
+    page.getByText('2 found · 0 missed', { exact: true }).first(),
+  ).toBeVisible();
+  await mode('offline');
+  await page
+    .getByRole('button', { name: 'Retry AI feedback', exact: true })
+    .click();
+  await expect(page.getByRole('alert')).toContainText(
+    'earlier successful feedback',
+  );
+  await expect(
+    page.getByText('2 found · 0 missed', { exact: true }).first(),
+  ).toBeVisible();
+  await page
+    .getByRole('button', { name: 'Check local AI setup', exact: true })
+    .click();
+  await expect(page.locator('.ai-setup')).toContainText(
+    'Local AI is unavailable.',
+  );
+  await page.getByText('AI feedback history (3)', { exact: true }).click();
+  await expect(page.locator('.assessment-history li')).toHaveCount(3);
+  const saved = await (
+    await page.request.get(`/api/attempts/${attempt.id}`)
+  ).json();
+  expect(
+    saved.results.runs.map((run: { status: string }) => run.status),
+  ).toEqual(['failed', 'succeeded', 'failed']);
+});
+
+test('unfinished notes and failed saves cannot be submitted', async ({
+  page,
+}) => {
+  const attempt = await open(page);
+  await page
+    .getByRole('button', { name: 'Comment on new line 9', exact: true })
+    .click();
+  await page
+    .getByLabel('Review comment', { exact: true })
+    .fill('both: Iterator and failure paths.');
+  await finish(page);
+  await expect(page.getByRole('alert')).toContainText(
+    'Add or cancel your open note',
+  );
+  await page.route(`**/api/attempts/${attempt.id}/comments`, (route) =>
+    route.fulfill({
+      status: 503,
+      json: { error: 'Save failed. Your notes are kept.' },
+    }),
+  );
+  await page.getByRole('button', { name: 'Add comment', exact: true }).click();
+  await finish(page);
+  await expect(page.getByRole('alert')).toContainText('Save failed');
+  expect(
+    (await (await page.request.get(`/api/attempts/${attempt.id}`)).json())
+      .state,
+  ).toBe('draft');
+  await page.unroute(`**/api/attempts/${attempt.id}/comments`);
+  await finish(page);
+  await expect(
+    page.getByText('2 found · 0 missed', { exact: true }).first(),
+  ).toBeVisible();
+});
+
+test('a lost submission response can be retried without duplicate jobs or editing the locked review', async ({
+  page,
+}) => {
+  const attempt = await open(page);
+  await note(page, 'both: Iterator and failure paths.');
+  await page.route(`**/api/attempts/${attempt.id}/submit`, async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+  await finish(page);
+  await expect(page.getByRole('alert')).toContainText(
+    'Submission could not be confirmed',
+  );
+  await expect(
+    page.getByRole('button', { name: 'Comment on new line 9', exact: true }),
+  ).toBeDisabled();
+  await page.unroute(`**/api/attempts/${attempt.id}/submit`);
+  await finish(page);
+  await expect(
+    page.getByText('2 found · 0 missed', { exact: true }).first(),
+  ).toBeVisible();
+  const saved = await (
+    await page.request.get(`/api/attempts/${attempt.id}`)
+  ).json();
+  expect(saved.results.runs).toHaveLength(1);
+});

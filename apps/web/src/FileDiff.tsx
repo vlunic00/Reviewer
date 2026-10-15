@@ -93,22 +93,24 @@ export function FileDiff({
                     {comment.anchor.side === 'old' ? 'Original' : 'Updated'} ·
                     lines {comment.anchor.startLine}–{comment.anchor.endLine}
                   </span>
-                  <div>
-                    <button
-                      disabled={editing || readOnly}
-                      onClick={() => onEdit(comment)}
-                      aria-label={`Edit comment: ${comment.body}`}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      disabled={editing || readOnly}
-                      onClick={() => onDelete(comment.id)}
-                      aria-label={`Delete comment: ${comment.body}`}
-                    >
-                      Delete
-                    </button>
-                  </div>
+                  {!readOnly && (
+                    <div>
+                      <button
+                        disabled={editing || readOnly}
+                        onClick={() => onEdit(comment)}
+                        aria-label={`Edit comment: ${comment.body}`}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        disabled={editing || readOnly}
+                        onClick={() => onDelete(comment.id)}
+                        aria-label={`Delete comment: ${comment.body}`}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
                 </header>
                 <p>{comment.body}</p>
               </article>
@@ -167,8 +169,9 @@ export function FileDiff({
             : file.status === 'unchanged'
               ? 'Unchanged context'
               : 'Original (old) and updated (new) line numbers'}{' '}
-        · Click a line number to write a note. Shift-click another line on the
-        same side to select a range.
+        {readOnly
+          ? ' · Saved review, read-only.'
+          : ' · Click a line number to write a note. Shift-click another line on the same side to select a range.'}
       </div>
       {selection && mode !== 'diff' && selection.side !== mode && (
         <button
