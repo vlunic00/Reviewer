@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "ts-hard-001",
+  "revision": 1,
+  "language": "typescript",
+  "difficulty": "hard",
+  "title": "Share cached catalog requests",
+  "description": "A cache simplification changes request identity and the objects returned to offer builders.",
+  "commitMessage": "Reuse catalog promises and add display labels to offers.",
+  "reviewContext": "Each tenant has an independent price catalog, including overlapping SKUs. Tenant and SKU identifiers are nonempty and contain no colon. A cache instance serves several tenants for its whole lifetime. Failed loads must be retried by a later get call; concurrent reads of one tenant/SKU may share an in-flight request. Product contains only the flat fields shown and source.load returns validated data. Every caller must receive its own mutable Product copy; offer deliberately adjusts that copy. Discounts are already validated between zero and the base price. No expiry policy or concurrent invalidation is required in this exercise.",
+  "files": [
+    {
+      "path": "src/catalog-cache.ts",
+      "status": "modified",
+      "before": "import type { CatalogSource, Product } from \"./types\";\n\nexport class CatalogCache {\n  private readonly pending = new Map<string, Promise<Product>>();\n\n  constructor(private readonly source: CatalogSource) {}\n\n  async get(tenant: string, sku: string): Promise<Product> {\n    const key = `${tenant}:${sku}`;\n    let request = this.pending.get(key);\n    if (!request) {\n      request = this.source.load(tenant, sku);\n      this.pending.set(key, request);\n      const current = request;\n      void current.catch(() => {\n        if (this.pending.get(key) === current) this.pending.delete(key);\n      });\n    }\n    return { ...await request };\n  }\n}\n",
+      "after": "import type { CatalogSource, Product } from \"./types\";\n\nexport class CatalogCache {\n  private readonly pending = new Map<string, Promise<Product>>();\n\n  constructor(private readonly source: CatalogSource) {}\n\n  async get(tenant: string, sku: string): Promise<Product> {\n    const key = sku;\n    let request = this.pending.get(key);\n    if (!request) {\n      request = this.source.load(tenant, sku);\n      this.pending.set(key, request);\n    }\n    return request;\n  }\n}\n"
+    },
+    {
+      "path": "src/offers.ts",
+      "status": "modified",
+      "before": "import { CatalogCache } from \"./catalog-cache\";\n\nexport async function offer(cache: CatalogCache, tenant: string, sku: string, discountCents: number) {\n  const product = await cache.get(tenant, sku);\n  product.priceCents -= discountCents;\n  return product;\n}\n",
+      "after": "import { CatalogCache } from \"./catalog-cache\";\n\nexport async function offer(cache: CatalogCache, tenant: string, sku: string, discountCents: number) {\n  const product = await cache.get(tenant, sku);\n  product.priceCents -= discountCents;\n  return { ...product, label: `Offer for ${product.sku}` };\n}\n"
+    },
+    {
+      "path": "src/types.ts",
+      "status": "unchanged",
+      "before": "export interface Product {\n  sku: string;\n  priceCents: number;\n}\n\nexport interface CatalogSource {\n  load(tenant: string, sku: string): Promise<Product>;\n}\n",
+      "after": "export interface Product {\n  sku: string;\n  priceCents: number;\n}\n\nexport interface CatalogSource {\n  load(tenant: string, sku: string): Promise<Product>;\n}\n"
+    }
+  ],
+  "tags": [
+    "tenant isolation",
+    "promise caching",
+    "aliasing"
+  ]
+}

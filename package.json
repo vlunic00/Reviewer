@@ -12,6 +12,7 @@
     "start": "node --env-file-if-exists=.env dist/apps/server/src/index.js",
     "typecheck": "tsc --noEmit",
     "validate:cases": "tsx scripts/validate-cases.ts",
+    "check:examples": "tsx scripts/check-examples.ts",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },

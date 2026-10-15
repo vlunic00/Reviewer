@@ -1,0 +1,162 @@
+{
+  "exerciseId": "ts-hard-001",
+  "revision": 1,
+  "issues": [
+    {
+      "id": "issue-001",
+      "title": "The cache key loses the tenant boundary",
+      "category": "data isolation",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "src/catalog-cache.ts",
+          "side": "old",
+          "startLine": 9,
+          "endLine": 9
+        },
+        {
+          "filePath": "src/catalog-cache.ts",
+          "side": "new",
+          "startLine": 9,
+          "endLine": 9
+        },
+        {
+          "filePath": "src/offers.ts",
+          "side": "new",
+          "startLine": 4,
+          "endLine": 4
+        }
+      ],
+      "summary": "Different tenants requesting the same SKU share the first tenant's cached request and price.",
+      "explanation": "The loader result depends on two inputs: tenant and SKU. The old key encoded both using a delimiter excluded by the identifier contract. The new key keeps only SKU, so the pending map cannot distinguish two tenants with the same product identifier.\n\nThe first request determines the promise stored under that SKU. A later read for another tenant sees the same promise and bypasses source.load, returning the first tenant's price. This happens for overlapping in-flight calls and for already fulfilled promises because the cache retains them. The offer builder passes tenant correctly; the isolation loss is inside the cache.",
+      "failureExample": "Tenant red prices SKU pen at 100 cents; tenant blue prices it at 250. Call get(red, pen), then get(blue, pen). Expected: 100 and 250 with a separate load for each tenant. Actual: both reads use the first promise and return 100. Reversing the order can expose blue's price to red instead.",
+      "whyItMatters": "Offers use another tenant's catalog data and can reveal tenant-specific pricing or charge an incorrect amount.",
+      "suggestedFix": "Restore a key containing both tenant and SKU. The stated no-colon constraint makes the shown composite key unambiguous. Keep promise sharing only inside that full identity; the integrated correction also restores failure eviction and caller copies.",
+      "correctedCode": [
+        {
+          "filePath": "src/catalog-cache.ts",
+          "code": "import type { CatalogSource, Product } from \"./types\";\n\nexport class CatalogCache {\n  private readonly pending = new Map<string, Promise<Product>>();\n\n  constructor(private readonly source: CatalogSource) {}\n\n  async get(tenant: string, sku: string): Promise<Product> {\n    const key = `${tenant}:${sku}`;\n    let request = this.pending.get(key);\n    if (!request) {\n      request = this.source.load(tenant, sku);\n      this.pending.set(key, request);\n      const current = request;\n      void current.catch(() => {\n        if (this.pending.get(key) === current) this.pending.delete(key);\n      });\n    }\n    return { ...await request };\n  }\n}\n"
+        }
+      ],
+      "prevention": "List every input that determines a cached value and compare it with the cache key. Test identical SKUs in two tenants, including simultaneous reads and both call orders. Add a same-tenant concurrent-read check to preserve the intended coalescing optimization.",
+      "acceptableExplanations": [
+        "The key uses sku but omits tenant.",
+        "Promises for the same SKU leak prices across tenants.",
+        "Cache by tenant and SKU together."
+      ],
+      "keyConcepts": [
+        "cache identity",
+        "multi-tenant isolation",
+        "in-flight request coalescing"
+      ],
+      "commonConfusions": [
+        "Passing tenant to source.load does not help when a cache hit skips that call.",
+        "An already fulfilled promise remains a cached value."
+      ]
+    },
+    {
+      "id": "issue-002",
+      "title": "A rejected promise permanently poisons the entry",
+      "category": "failure recovery",
+      "severity": "medium",
+      "locations": [
+        {
+          "filePath": "src/catalog-cache.ts",
+          "side": "old",
+          "startLine": 15,
+          "endLine": 15
+        },
+        {
+          "filePath": "src/catalog-cache.ts",
+          "side": "new",
+          "startLine": 13,
+          "endLine": 13
+        },
+        {
+          "filePath": "src/catalog-cache.ts",
+          "side": "new",
+          "startLine": 15,
+          "endLine": 15
+        }
+      ],
+      "summary": "The removed rejection handler leaves failed requests cached instead of allowing a later reload.",
+      "explanation": "A promise is settled once. Keeping a rejected promise in a map does not cause its producer to run again when another caller awaits it. The old rejection handler deleted the map entry, but only if it still referred to that request. The refactor removes that lifecycle step.\n\nAfter one transient source error, every later get for the same key retrieves the rejected promise and observes the old failure without asking the recovered source for data. Catching the rejection in offer's caller avoids an unhandled error but does not repair the cache. This is distinct from choosing the wrong tenant key.",
+      "failureExample": "For one tenant/SKU, make the first load reject with a temporary error and the second load return a valid product. Expected: the first get rejects and a later get invokes load again and succeeds. Actual: load is called only once and every get rejects from the retained promise.",
+      "whyItMatters": "A short catalog outage becomes a persistent failure for that cache instance, even after the source recovers.",
+      "suggestedFix": "Attach rejection cleanup that evicts the failed promise and keep returning its rejection to the caller. Compare the stored promise by identity before deleting it so cleanup cannot remove a replacement entry. A later caller can then initiate a fresh load; do not turn failures into invented default products.",
+      "correctedCode": [
+        {
+          "filePath": "src/catalog-cache.ts",
+          "code": "import type { CatalogSource, Product } from \"./types\";\n\nexport class CatalogCache {\n  private readonly pending = new Map<string, Promise<Product>>();\n\n  constructor(private readonly source: CatalogSource) {}\n\n  async get(tenant: string, sku: string): Promise<Product> {\n    const key = `${tenant}:${sku}`;\n    let request = this.pending.get(key);\n    if (!request) {\n      request = this.source.load(tenant, sku);\n      this.pending.set(key, request);\n      const current = request;\n      void current.catch(() => {\n        if (this.pending.get(key) === current) this.pending.delete(key);\n      });\n    }\n    return { ...await request };\n  }\n}\n"
+        }
+      ],
+      "prevention": "Review promise caches through pending, fulfilled and rejected states. Test failure followed by recovery, asserting both the returned outcome and source call count. Verify concurrent callers still share one successful request and failures remain observable to their callers.",
+      "acceptableExplanations": [
+        "Rejected promises are cached forever after catch cleanup was removed.",
+        "A transient failure cannot be retried because get reuses the rejected promise.",
+        "Evict failed requests without hiding the rejection."
+      ],
+      "keyConcepts": [
+        "promise settlement",
+        "cache eviction",
+        "transient failure recovery"
+      ],
+      "commonConfusions": [
+        "Awaiting a rejected promise again does not retry the original operation.",
+        "Catching an error at a call site does not remove its cached promise."
+      ]
+    },
+    {
+      "id": "issue-003",
+      "title": "Offer mutations now change the cached base product",
+      "category": "shared mutable state",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "src/catalog-cache.ts",
+          "side": "old",
+          "startLine": 19,
+          "endLine": 19
+        },
+        {
+          "filePath": "src/catalog-cache.ts",
+          "side": "new",
+          "startLine": 15,
+          "endLine": 15
+        },
+        {
+          "filePath": "src/offers.ts",
+          "side": "new",
+          "startLine": 5,
+          "endLine": 5
+        }
+      ],
+      "summary": "Returning the resolved object directly lets an offer discount mutate the value shared by future reads.",
+      "explanation": "The promise resolves to a Product object, and all awaits of that promise observe the same object identity. The previous get spread that flat product into a fresh object on every call. The refactor returns the promise directly, so the outer async promise adopts its value without cloning it.\n\nThe offer function intentionally subtracts a discount from the caller-owned product. It now mutates the cached base price. A later get or another offer reads that already-discounted value, and repeated discounts accumulate. Spreading the object when returning the display label in offers.ts happens after the mutation and cannot undo it.",
+      "failureExample": "The source returns a 100-cent pen. Build an offer with a 10-cent discount, then read the product again. Expected: the offer is 90 and the cached base product is still 100. Actual: the base read is 90; another 10-cent offer can reduce it to 80. This can occur sequentially with one tenant, so it does not depend on a race or the tenant-key defect.",
+      "whyItMatters": "One request changes prices observed by later requests and causes repeated discounts or inconsistent offers.",
+      "suggestedFix": "Return a fresh spread of the resolved Product on every get. Product is flat in the supplied contract, so a shallow copy isolates all mutable fields here. If nested mutable fields are introduced, revisit that copying contract. The source promise can remain shared while callers receive independent objects.",
+      "correctedCode": [
+        {
+          "filePath": "src/catalog-cache.ts",
+          "code": "import type { CatalogSource, Product } from \"./types\";\n\nexport class CatalogCache {\n  private readonly pending = new Map<string, Promise<Product>>();\n\n  constructor(private readonly source: CatalogSource) {}\n\n  async get(tenant: string, sku: string): Promise<Product> {\n    const key = `${tenant}:${sku}`;\n    let request = this.pending.get(key);\n    if (!request) {\n      request = this.source.load(tenant, sku);\n      this.pending.set(key, request);\n      const current = request;\n      void current.catch(() => {\n        if (this.pending.get(key) === current) this.pending.delete(key);\n      });\n    }\n    return { ...await request };\n  }\n}\n"
+        }
+      ],
+      "prevention": "When an optimization removes a copy, trace every consumer for mutations. Assert both value equality and distinct object identity across reads, then mutate one returned value and confirm another read is unchanged. Test the actual offer helper so a harmless-looking final spread does not mask the earlier write.",
+      "acceptableExplanations": [
+        "get returns a shared Product object and offer mutates it.",
+        "The removed spread lets discounts corrupt the cached base price.",
+        "Clone each resolved product before returning it to a mutable caller."
+      ],
+      "keyConcepts": [
+        "object identity",
+        "aliasing",
+        "copy boundaries"
+      ],
+      "commonConfusions": [
+        "An async return wraps completion, not object ownership.",
+        "The offer's final spread cannot protect the object it already mutated."
+      ]
+    }
+  ]
+}

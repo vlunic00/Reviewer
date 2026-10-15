@@ -1,0 +1,104 @@
+{
+  "exerciseId": "ts-medium-001",
+  "revision": 1,
+  "issues": [
+    {
+      "id": "issue-001",
+      "title": "forEach does not await its async callbacks",
+      "category": "async control flow",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "src/notify.ts",
+          "side": "new",
+          "startLine": 5,
+          "endLine": 5
+        },
+        {
+          "filePath": "src/notify.ts",
+          "side": "new",
+          "startLine": 6,
+          "endLine": 6
+        }
+      ],
+      "summary": "The outer promise resolves before email delivery finishes and does not carry callback rejections.",
+      "explanation": "forEach invokes each callback and discards its return value. An async callback returns a promise, but placing await inside that callback only pauses the callback itself. notifyAccounts reaches its end as soon as forEach has scheduled the callbacks, so its Promise<void> is fulfilled while sends can still be pending.\n\nIf a send rejects, that rejection belongs to the discarded callback promise, not the already-fulfilled outer promise. Awaiting notifyAccounts at the call site therefore neither waits for delivery nor observes delivery failures. The personalized subject helper is synchronous and is not the cause.",
+      "failureExample": "Use a mailer whose send returns a promise controlled by a test gate. Call notifyAccounts for one opted-in account. Expected: its returned promise stays pending until the gate is released. Actual: it resolves with the gate still closed. In a separate failing-send test, the outer promise reports success while the callback rejects; handle that discarded rejection in the test harness rather than relying on a particular unhandled-rejection policy.",
+      "whyItMatters": "A scheduler can record delivery complete too early, exit before sends finish, or fail to report a rejected delivery.",
+      "suggestedFix": "Await Promise.all over promises returned by map, after applying the preference filter. Promise.all stays pending until every send succeeds and rejects if a send rejects. It does not cancel other sends, which is permitted here. An awaited for...of loop is also correct when serial delivery is acceptable.",
+      "correctedCode": [
+        {
+          "filePath": "src/notify.ts",
+          "code": "import type { Account, Mailer } from \"./types\";\nimport { subjectFor } from \"./subject\";\n\nexport async function notifyAccounts(accounts: Account[], mailer: Mailer): Promise<void> {\n  await Promise.all(accounts.filter((account) => account.allowEmail).map(async (account) => {\n    await mailer.send(account.email, subjectFor(account));\n  }));\n}\n"
+        }
+      ],
+      "prevention": "At every async boundary, follow which promise is returned to the caller. A void-returning collection iterator does not join asynchronous work. Test with controllable pending sends and an explicitly rejected send; do not test only immediately resolved promises. Verify the caller observes completion or failure through the returned promise.",
+      "acceptableExplanations": [
+        "The forEach callback promises are discarded.",
+        "Awaiting notifyAccounts does not wait for mailer.send.",
+        "Use awaited Promise.all(map(...)) or an awaited for...of loop."
+      ],
+      "keyConcepts": [
+        "async callbacks",
+        "promise ownership",
+        "completion and rejection propagation"
+      ],
+      "commonConfusions": [
+        "async on the outer function does not automatically await promises created inside it.",
+        "Promise.all joins results but does not cancel sibling operations on rejection."
+      ]
+    },
+    {
+      "id": "issue-002",
+      "title": "The opt-out guard disappeared",
+      "category": "preference enforcement",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "src/notify.ts",
+          "side": "old",
+          "startLine": 5,
+          "endLine": 5
+        },
+        {
+          "filePath": "src/notify.ts",
+          "side": "new",
+          "startLine": 6,
+          "endLine": 6
+        },
+        {
+          "filePath": "src/subject.ts",
+          "side": "new",
+          "startLine": 4,
+          "endLine": 4
+        }
+      ],
+      "summary": "The new callback sends mail to opted-out accounts as well as eligible accounts.",
+      "explanation": "allowEmail is the explicit eligibility decision in the Account contract. The previous loop skipped an account before invoking the mailer when that flag was false. The replacement callback has no equivalent branch or pre-filter and sends to every input address.\n\nsubjectFor reads only the identifier to build a subject. It does not check eligibility, and having a valid address is not permission to send. This is separate from the promise-joining defect: awaiting all callbacks would still send unwanted mail unless the removed guard is restored.",
+      "failureExample": "Pass Alice with allowEmail=true and Bob with allowEmail=false to a recording mailer. Expected: only Alice appears in the send log. Actual: both addresses are passed to send. Empty input or a fixture containing only opted-in accounts hides this regression.",
+      "whyItMatters": "Users who explicitly declined email receive account-summary notifications.",
+      "suggestedFix": "Filter for allowEmail before mapping to send promises, or retain the original early continue. This prevents the side effect for excluded accounts. The integrated correction also joins send promises so the caller can trust completion.",
+      "correctedCode": [
+        {
+          "filePath": "src/notify.ts",
+          "code": "import type { Account, Mailer } from \"./types\";\nimport { subjectFor } from \"./subject\";\n\nexport async function notifyAccounts(accounts: Account[], mailer: Mailer): Promise<void> {\n  await Promise.all(accounts.filter((account) => account.allowEmail).map(async (account) => {\n    await mailer.send(account.email, subjectFor(account));\n  }));\n}\n"
+        }
+      ],
+      "prevention": "When replacing a loop, map every removed guard to an equivalent condition in the new pipeline. Use mixed opted-in/opted-out inputs and assert which side effects did not occur, not just how many eligible sends succeeded. Keep subject generation and send authorization as separate responsibilities.",
+      "acceptableExplanations": [
+        "The refactor removed the allowEmail check.",
+        "Opted-out accounts now receive email.",
+        "Filter accounts by their email preference before sending."
+      ],
+      "keyConcepts": [
+        "removed behavior",
+        "side-effect eligibility",
+        "negative-path tests"
+      ],
+      "commonConfusions": [
+        "A subject helper is not an eligibility check.",
+        "Fixing asynchronous completion does not restore the preference guard."
+      ]
+    }
+  ]
+}
