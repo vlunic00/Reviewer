@@ -449,3 +449,79 @@ test('fixture versions cover additions, deletions, expanded context, long lines,
     'new',
   ]);
 });
+
+test('a partially hidden range in a long file stays complete and leaves unrelated context collapsed', async ({
+  page,
+}) => {
+  const id = randomUUID();
+  const before =
+    Array.from(
+      { length: 2000 },
+      (_, index) => `const value${index} = ${index};`,
+    ).join('\r\n') + '\r\n';
+  const exercise = exerciseSchema.parse({
+    schemaVersion: 1,
+    id: 'long-range-fixture',
+    revision: 1,
+    language: 'typescript',
+    difficulty: 'medium',
+    title: 'Review a long source file',
+    description: 'Fixture',
+    commitMessage: 'Fixture',
+    files: [
+      {
+        path: 'large.ts',
+        status: 'modified',
+        before,
+        after: before.replace('value1000 = 1000', 'value1000 = -1'),
+      },
+    ],
+  });
+  const fixture: ReviewAttempt = {
+    id,
+    exercise,
+    state: 'draft',
+    version: 0,
+    startedAt: new Date().toISOString(),
+    comments: [],
+    diffs: buildDiffs(exercise),
+  };
+  await page.route(`**/api/attempts/${id}`, (route) =>
+    route.fulfill({ json: fixture }),
+  );
+  await page.goto(`/?attempt=${id}`);
+  await page
+    .getByRole('button', { name: 'Comment on new line 1001', exact: true })
+    .click();
+  await page.getByLabel('Start line', { exact: true }).fill('990');
+  await page.getByLabel('End line', { exact: true }).fill('1003');
+  await expect(page.locator('.diff-code-selected')).toHaveCount(14);
+  await expect(
+    page.getByRole('button', { name: 'Comment on new line 990', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Comment on new line 1', exact: true }),
+  ).toHaveCount(0);
+  expect(await page.locator('.line-button').count()).toBeLessThan(60);
+  await page
+    .getByLabel('Review comment', { exact: true })
+    .fill('This range includes context before the changed line.');
+  await expect(page.locator('.diff-code-selected')).toHaveCount(14);
+  await page.getByRole('button', { name: 'Cancel note', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Expand all context', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'Comment on new line 1', exact: true })
+    .click();
+  await page.getByLabel('Start line', { exact: true }).fill('990');
+  await page.getByLabel('End line', { exact: true }).fill('1003');
+  await page
+    .getByRole('button', { name: 'Collapse context', exact: true })
+    .click();
+  await expect(
+    page.getByRole('form', { name: 'Comment editor' }),
+  ).toBeVisible();
+  expect(await page.locator('.line-button').count()).toBeLessThan(80);
+  await page.getByRole('button', { name: 'Cancel note', exact: true }).click();
+});

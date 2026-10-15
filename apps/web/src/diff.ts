@@ -46,17 +46,47 @@ export function fileHunks(
   patch: string,
   mode: FileVersion,
   expanded: boolean,
+  anchors: ReviewCommentAnchor[] = [],
 ): HunkData[] {
   if (mode !== 'diff' || file.status === 'unchanged') {
     const source = mode === 'old' ? file.before : (file.after ?? file.before);
     const hunk = textLinesToHunk(sourceLines(source ?? ''), 1, 1);
     return hunk ? [hunk] : [];
   }
-  const hunks = parseDiff(patch, { nearbySequences: 'zip' })[0]?.hunks ?? [];
+  let hunks = parseDiff(patch, { nearbySequences: 'zip' })[0]?.hunks ?? [];
+  if (!hunks.length) {
+    const hunk = textLinesToHunk(
+      sourceLines(file.after ?? file.before ?? ''),
+      1,
+      1,
+    );
+    return hunk ? [hunk] : [];
+  }
   const oldLines = sourceLines(file.before ?? '');
-  return expanded && oldLines.length
-    ? expandFromRawCode(hunks, oldLines, 1, oldLines.length + 1)
-    : hunks;
+  if (expanded && oldLines.length)
+    return expandFromRawCode(hunks, oldLines, 1, oldLines.length + 1);
+  // Hidden context has equal old/new lengths; only its coordinate offset differs.
+  const original = hunks;
+  for (let index = 0; index <= original.length && oldLines.length; index++) {
+    const previous = original[index - 1];
+    const next = original[index];
+    const oldStart = previous ? previous.oldStart + previous.oldLines : 1;
+    const newStart = previous ? previous.newStart + previous.newLines : 1;
+    const length = (next?.oldStart ?? oldLines.length + 1) - oldStart;
+    for (const anchor of anchors) {
+      const start = anchor.side === 'old' ? oldStart : newStart;
+      const from = Math.max(0, anchor.startLine - start - 3);
+      const to = Math.min(length, anchor.endLine - start + 4);
+      if (from < to)
+        hunks = expandFromRawCode(
+          hunks,
+          oldLines,
+          oldStart + from,
+          oldStart + to,
+        );
+    }
+  }
+  return hunks;
 }
 
 export function changeForAnchor(

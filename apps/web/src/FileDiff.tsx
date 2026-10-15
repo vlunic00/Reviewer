@@ -5,7 +5,6 @@ import type {
   ReviewCommentAnchor,
 } from '../../../packages/shared/src/index.js';
 import {
-  changeForAnchor,
   fileHunks,
   highlightHunks,
   lineOnSide,
@@ -46,22 +45,21 @@ export function FileDiff({
   const [mode, setMode] = useState<FileVersion>('diff');
   const [split, setSplit] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const initialHunks = useMemo(
-    () => fileHunks(file, patch, mode, expanded),
-    [file, patch, mode, expanded],
+  const anchors = [
+    ...comments.map((comment) => comment.anchor),
+    ...(selection ? [selection] : []),
+    ...(selection && editor && editorLine
+      ? [{ ...selection, startLine: editorLine, endLine: editorLine }]
+      : []),
+  ];
+  // Note text changes should not re-expand or re-highlight the source.
+  const anchorKey = JSON.stringify(anchors);
+  const hunks = useMemo(
+    () => fileHunks(file, patch, mode, expanded, anchors),
+    [file, patch, mode, expanded, anchorKey],
   );
   const visible = comments.filter(
     (comment) => mode === 'diff' || comment.anchor.side === mode,
-  );
-  const needsExpansion =
-    mode === 'diff' &&
-    (visible.some(
-      (comment) => !changeForAnchor(initialHunks, comment.anchor),
-    ) ||
-      (selection && !changeForAnchor(initialHunks, selection)));
-  const hunks = useMemo(
-    () => (needsExpansion ? fileHunks(file, patch, mode, true) : initialHunks),
-    [needsExpansion, initialHunks, file, patch, mode],
   );
   const tokens = useMemo(
     () => highlightHunks(hunks, file, mode),
