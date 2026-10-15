@@ -1,0 +1,58 @@
+{
+  "exerciseId": "py-easy-001",
+  "revision": 1,
+  "issues": [
+    {
+      "id": "issue-001",
+      "title": "Default lists are shared across calls",
+      "category": "shared mutable state",
+      "severity": "medium",
+      "locations": [
+        {
+          "filePath": "app/labels.py",
+          "side": "new",
+          "startLine": 1,
+          "endLine": 1
+        },
+        {
+          "filePath": "app/labels.py",
+          "side": "new",
+          "startLine": 2,
+          "endLine": 2
+        },
+        {
+          "filePath": "app/reporter.py",
+          "side": "new",
+          "startLine": 5,
+          "endLine": 5
+        }
+      ],
+      "summary": "The default list is created once and reused for every report that omits labels.",
+      "explanation": "Python evaluates default argument expressions when the function definition executes, not on each call. The [] in the new signature is therefore one list object retained by the function. Each omitted-argument call binds labels to that object and appends another report name.\n\nThe caller receives the same object each time. In report_labels, both stored results can change when a later report is processed; the earlier report does not keep its original one-item list. The previous None sentinel allocated a new list inside each omitted-argument call. Mutating an explicitly supplied list is an intentional part of the contract and is not a separate bug here.",
+      "failureExample": "In a fresh module, call first = labels_for(\"sales\"), then second = labels_for(\"stock\"). Expected: first is [sales], second is [stock], and they are different objects. Actual: both names refer to the same [sales, stock] list. Even first changes after its call has completed. An isolated one-call test passes.",
+      "whyItMatters": "Independent report labels become mixed and previously returned results change unexpectedly.",
+      "suggestedFix": "Restore None as the sentinel and allocate [] inside the function only when labels is None. This creates a fresh default per call while preserving the documented in-place append for explicitly supplied lists. Using labels or [] instead would replace an explicit empty list and change that contract.",
+      "correctedCode": [
+        {
+          "filePath": "app/labels.py",
+          "code": "def labels_for(report: str, labels: list[str] | None = None) -> list[str]:\n    if labels is None:\n        labels = []\n    labels.append(report)\n    return labels\n"
+        }
+      ],
+      "prevention": "Look for mutable literals or constructed mutable objects in function defaults. Test two calls in the same process, retain both results, and check their contents and identity after the second call. Also pass an explicit empty list and verify it is the object appended to and returned.",
+      "acceptableExplanations": [
+        "The [] default persists between calls.",
+        "Independent reports share the same label list.",
+        "Use None and create a new list inside the function."
+      ],
+      "keyConcepts": [
+        "default argument evaluation",
+        "object identity",
+        "mutable aliasing"
+      ],
+      "commonConfusions": [
+        "A default expression is not re-evaluated for every call.",
+        "The explicit-list path is allowed to mutate its argument."
+      ]
+    }
+  ]
+}

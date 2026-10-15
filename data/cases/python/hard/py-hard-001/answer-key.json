@@ -1,0 +1,162 @@
+{
+  "exerciseId": "py-hard-001",
+  "revision": 1,
+  "issues": [
+    {
+      "id": "issue-001",
+      "title": "gather can leave writers running during cleanup",
+      "category": "task lifetime",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "app/exporter.py",
+          "side": "old",
+          "startLine": 8,
+          "endLine": 8
+        },
+        {
+          "filePath": "app/exporter.py",
+          "side": "new",
+          "startLine": 9,
+          "endLine": 9
+        },
+        {
+          "filePath": "app/exporter.py",
+          "side": "new",
+          "startLine": 12,
+          "endLine": 12
+        }
+      ],
+      "summary": "When one child fails, default gather propagates that failure while sibling writers can remain active.",
+      "explanation": "The original TaskGroup owns the lifetime of its child tasks. If one part fails, the group cancels the other tasks and waits for them to finish before leaving its context. The outer exception handler therefore discards the stage only after its writers have stopped.\n\nDefault asyncio.gather instead propagates the first ordinary child exception without cancelling the other awaitables. The refresh handler can enter discard_stage while another write_part is suspended and still able to resume. Cleanup then removes data that an active task is using. Later writes or failures happen after refresh has already finished. This is a task-lifetime regression, independent of whether the handler re-raises the first failure.",
+      "failureExample": "Start parts fail and slow. Let slow signal that it has started, then suspend it on an event. Let fail raise OSError after that signal. Expected: slow is cancelled and reaches its finally block before discard_stage runs. Actual with gather: fail propagates immediately, discard_stage runs with slow still active, and releasing the event later allows slow to resume against the discarded stage. Use events to force this interleaving rather than assuming a scheduler order.",
+      "whyItMatters": "Cleanup races active writes, causing lost parts, errors after completion, or access to staging data that no longer exists.",
+      "suggestedFix": "Restore the TaskGroup boundary around all writes, and publish only after the group exits successfully. Because these async writers respond to cancellation, the group can cancel siblings and await their termination before cleanup. Re-raising alone does not join siblings; return_exceptions=True also needs explicit failure handling before publication.",
+      "correctedCode": [
+        {
+          "filePath": "app/exporter.py",
+          "code": "import asyncio\nfrom .store import SnapshotStore\n\n\nasync def refresh_snapshot(store: SnapshotStore, names: list[str]) -> None:\n    stage = await store.create_stage()\n    try:\n        async with asyncio.TaskGroup() as group:\n            for name in names:\n                group.create_task(store.write_part(stage, name))\n        await store.publish(stage)\n    except BaseException:\n        await store.discard_stage(stage)\n        raise\n"
+        }
+      ],
+      "prevention": "For concurrent work that uses a shared resource, identify who owns and joins every child task before releasing that resource. Test a failed writer with an event-gated sibling and assert that sibling termination precedes stage discard. Do not replace structured task supervision with gather based only on success-path tests.",
+      "acceptableExplanations": [
+        "gather leaves sibling writes running after one fails.",
+        "discard_stage can remove a stage still used by another task.",
+        "TaskGroup cancels and joins writers before cleanup."
+      ],
+      "keyConcepts": [
+        "structured concurrency",
+        "task ownership",
+        "cleanup ordering"
+      ],
+      "commonConfusions": [
+        "Awaiting gather does not mean all siblings have stopped when one raises.",
+        "Cancelling a gather that has already propagated an exception does not retroactively supervise its siblings."
+      ]
+    },
+    {
+      "id": "issue-002",
+      "title": "The previous snapshot is deleted before replacement is ready",
+      "category": "atomic publication",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "app/exporter.py",
+          "side": "new",
+          "startLine": 8,
+          "endLine": 8
+        },
+        {
+          "filePath": "app/exporter.py",
+          "side": "new",
+          "startLine": 10,
+          "endLine": 10
+        }
+      ],
+      "summary": "Clearing current data before generating the replacement breaks availability and destroys the fallback on failure.",
+      "explanation": "create_stage provides a separate work area and publish atomically replaces the visible snapshot once that work is complete. The old implementation leaves current data untouched during generation. The new clear_current call deletes the published snapshot before any part is known to have succeeded.\n\nReaders see no current snapshot during a normal refresh. If a writer fails or the operation is cancelled, publish never runs, and discarding the stage cannot restore the deleted current snapshot. This failure occurs even with one writer and even if child supervision and exception propagation are corrected.",
+      "failureExample": "Start with a published snapshot containing yesterday's data. Make the replacement writer raise OSError. Expected: the caller receives failure and readers can still use yesterday's snapshot. Actual: clear_current removed it before the write failed, so there is no published snapshot to read. A successful but slow writer also creates an avoidable empty-data interval.",
+      "whyItMatters": "A refresh error turns into loss of the last usable snapshot rather than leaving the previous data available.",
+      "suggestedFix": "Remove clear_current from the refresh path and let publish perform the atomic replacement after all part writes succeed. Keep failed staging data isolated and discard only that stage. Atomic replacement works because the old snapshot stays visible until the store commits the complete new one.",
+      "correctedCode": [
+        {
+          "filePath": "app/exporter.py",
+          "code": "import asyncio\nfrom .store import SnapshotStore\n\n\nasync def refresh_snapshot(store: SnapshotStore, names: list[str]) -> None:\n    stage = await store.create_stage()\n    try:\n        async with asyncio.TaskGroup() as group:\n            for name in names:\n                group.create_task(store.write_part(stage, name))\n        await store.publish(stage)\n    except BaseException:\n        await store.discard_stage(stage)\n        raise\n"
+        }
+      ],
+      "prevention": "Trace visible state through success, failure and cancellation, not just the final happy-path result. Seed a previous snapshot and inject a part failure; assert that the previous data remains unchanged and publish was not called. Gate a successful writer to verify readers keep seeing old data until publication.",
+      "acceptableExplanations": [
+        "The current snapshot is cleared before a replacement succeeds.",
+        "A failed refresh loses the previous usable data.",
+        "Publish the staged snapshot atomically without pre-deleting current data."
+      ],
+      "keyConcepts": [
+        "staging",
+        "atomic replacement",
+        "failure-preserving updates"
+      ],
+      "commonConfusions": [
+        "Discarding a stage does not restore already deleted published data.",
+        "Concurrent generation does not require deleting the previous snapshot."
+      ]
+    },
+    {
+      "id": "issue-003",
+      "title": "Cleanup now hides failures and cancellation from the caller",
+      "category": "error propagation",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "app/exporter.py",
+          "side": "old",
+          "startLine": 14,
+          "endLine": 14
+        },
+        {
+          "filePath": "app/exporter.py",
+          "side": "new",
+          "startLine": 11,
+          "endLine": 11
+        },
+        {
+          "filePath": "app/exporter.py",
+          "side": "new",
+          "startLine": 13,
+          "endLine": 13
+        },
+        {
+          "filePath": "app/runner.py",
+          "side": "new",
+          "startLine": 6,
+          "endLine": 6
+        }
+      ],
+      "summary": "The replacement return turns a failed or cancelled export into an apparent successful completion.",
+      "explanation": "The handler catches BaseException so it can clean staging data even when cancellation interrupts the refresh. In the previous implementation, the bare raise preserved the original failure after cleanup. The new return completes the coroutine normally instead.\n\nOSError from a writer is hidden, and asyncio.CancelledError is hidden too because it is a BaseException subclass. run_export then continues and returns a complete state and requested part count even though no replacement was published. Cleaning resources is appropriate; changing the operation's outcome to success is not. An ordinary except Exception would avoid catching cancellation but would still need a cleanup strategy and failure propagation.",
+      "failureExample": "Force write_part to fail. Expected: run_export raises and the job is marked failed. Actual: refresh_snapshot returns None after cleanup, so run_export reports state=complete. Separately, cancel a pending refresh once: expected awaiting it raises CancelledError; actual the new handler consumes cancellation and completes normally.",
+      "whyItMatters": "Callers record false success, skip recovery, and cannot reliably stop work through cancellation.",
+      "suggestedFix": "Keep cleanup followed by a bare raise so the original failure or cancellation continues to the caller. Combine this with TaskGroup supervision so no writers outlive cleanup, and preserve the prior snapshot until publication. The integrated correction restores all three independent guarantees.",
+      "correctedCode": [
+        {
+          "filePath": "app/exporter.py",
+          "code": "import asyncio\nfrom .store import SnapshotStore\n\n\nasync def refresh_snapshot(store: SnapshotStore, names: list[str]) -> None:\n    stage = await store.create_stage()\n    try:\n        async with asyncio.TaskGroup() as group:\n            for name in names:\n                group.create_task(store.write_part(stage, name))\n        await store.publish(stage)\n    except BaseException:\n        await store.discard_stage(stage)\n        raise\n"
+        }
+      ],
+      "prevention": "Review every broad exception handler for its effect on failure and cancellation signals. Test an ordinary writer failure and explicit task cancellation separately; assert the caller observes each and never emits a complete result. Verify cleanup still runs exactly once.",
+      "acceptableExplanations": [
+        "Returning after BaseException masks errors and cancellation.",
+        "run_export reports completion after a failed export.",
+        "Re-raise after cleanup instead of returning success."
+      ],
+      "keyConcepts": [
+        "BaseException",
+        "CancelledError",
+        "outcome propagation"
+      ],
+      "commonConfusions": [
+        "A None return from an async function is normal completion, not an error signal.",
+        "Cleanup code should not silently convert cancellation into success."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "py-hard-001",
+  "revision": 1,
+  "language": "python",
+  "difficulty": "hard",
+  "title": "Simplify concurrent snapshot exports",
+  "description": "An export refactor changes task supervision, publication, and the result reported to callers.",
+  "commitMessage": "Use gather for snapshot parts and include a part count in export results.",
+  "reviewContext": "Python 3.11+. One refresh runs at a time; names are unique, nonempty part identifiers. A previously published snapshot must stay readable until a new complete stage is atomically published. Failed work and cancellation must reach the caller. No task may still write to a stage when discard_stage removes it. Store methods have the supplied protocol semantics; discard_stage does not fail. write_part is an async operation that responds to cancellation, not a background thread. Concurrent callers and repeated cancellation during cleanup are outside this exercise.",
+  "files": [
+    {
+      "path": "app/exporter.py",
+      "status": "modified",
+      "before": "import asyncio\nfrom .store import SnapshotStore\n\n\nasync def refresh_snapshot(store: SnapshotStore, names: list[str]) -> None:\n    stage = await store.create_stage()\n    try:\n        async with asyncio.TaskGroup() as group:\n            for name in names:\n                group.create_task(store.write_part(stage, name))\n        await store.publish(stage)\n    except BaseException:\n        await store.discard_stage(stage)\n        raise\n",
+      "after": "import asyncio\nfrom .store import SnapshotStore\n\n\nasync def refresh_snapshot(store: SnapshotStore, names: list[str]) -> None:\n    stage = await store.create_stage()\n    try:\n        await store.clear_current()\n        await asyncio.gather(*(store.write_part(stage, name) for name in sorted(names)))\n        await store.publish(stage)\n    except BaseException:\n        await store.discard_stage(stage)\n        return\n"
+    },
+    {
+      "path": "app/runner.py",
+      "status": "modified",
+      "before": "from .exporter import refresh_snapshot\nfrom .store import SnapshotStore\n\n\nasync def run_export(store: SnapshotStore, names: list[str]) -> dict[str, str | int]:\n    await refresh_snapshot(store, names)\n    return {\"state\": \"complete\"}\n",
+      "after": "from .exporter import refresh_snapshot\nfrom .store import SnapshotStore\n\n\nasync def run_export(store: SnapshotStore, names: list[str]) -> dict[str, str | int]:\n    await refresh_snapshot(store, names)\n    return {\"state\": \"complete\", \"parts\": len(names)}\n"
+    },
+    {
+      "path": "app/store.py",
+      "status": "unchanged",
+      "before": "from typing import Protocol\n\n\nclass SnapshotStore(Protocol):\n    async def create_stage(self) -> str:\n        \"\"\"Return a new isolated staging identifier.\"\"\"\n        ...\n\n    async def write_part(self, stage: str, name: str) -> None:\n        \"\"\"Write one part; may suspend, fail, or be cancelled.\"\"\"\n        ...\n\n    async def publish(self, stage: str) -> None:\n        \"\"\"Atomically replace the current snapshot with the complete stage.\"\"\"\n        ...\n\n    async def discard_stage(self, stage: str) -> None:\n        \"\"\"Remove staging data after all writers stop; this cleanup does not fail.\"\"\"\n        ...\n\n    async def clear_current(self) -> None:\n        \"\"\"Remove the published snapshot, leaving no current data.\"\"\"\n        ...\n",
+      "after": "from typing import Protocol\n\n\nclass SnapshotStore(Protocol):\n    async def create_stage(self) -> str:\n        \"\"\"Return a new isolated staging identifier.\"\"\"\n        ...\n\n    async def write_part(self, stage: str, name: str) -> None:\n        \"\"\"Write one part; may suspend, fail, or be cancelled.\"\"\"\n        ...\n\n    async def publish(self, stage: str) -> None:\n        \"\"\"Atomically replace the current snapshot with the complete stage.\"\"\"\n        ...\n\n    async def discard_stage(self, stage: str) -> None:\n        \"\"\"Remove staging data after all writers stop; this cleanup does not fail.\"\"\"\n        ...\n\n    async def clear_current(self) -> None:\n        \"\"\"Remove the published snapshot, leaving no current data.\"\"\"\n        ...\n"
+    }
+  ],
+  "tags": [
+    "asyncio",
+    "cancellation",
+    "atomic publication"
+  ]
+}

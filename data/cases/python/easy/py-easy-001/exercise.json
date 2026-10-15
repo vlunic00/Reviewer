@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "py-easy-001",
+  "revision": 1,
+  "language": "python",
+  "difficulty": "easy",
+  "title": "Reuse report label defaults",
+  "description": "A helper simplifies its optional list argument while reports are labeled independently.",
+  "commitMessage": "Use a list default to simplify report label construction.",
+  "reviewContext": "Calling labels_for without an explicit list must start a fresh list for that report. Returned default lists must remain independent after later calls. An explicitly supplied list is intentionally appended to in place and returned. The project uses Python 3.11 or newer.",
+  "files": [
+    {
+      "path": "app/labels.py",
+      "status": "modified",
+      "before": "def labels_for(report: str, labels: list[str] | None = None) -> list[str]:\n    if labels is None:\n        labels = []\n    labels.append(report)\n    return labels\n",
+      "after": "def labels_for(report: str, labels: list[str] = []) -> list[str]:\n    labels.append(report)\n    return labels\n"
+    },
+    {
+      "path": "app/reporter.py",
+      "status": "unchanged",
+      "before": "from .labels import labels_for\n\n\ndef report_labels(names: list[str]) -> list[list[str]]:\n    return [labels_for(name) for name in names]\n",
+      "after": "from .labels import labels_for\n\n\ndef report_labels(names: list[str]) -> list[list[str]]:\n    return [labels_for(name) for name in names]\n"
+    }
+  ],
+  "tags": [
+    "mutable defaults",
+    "aliasing"
+  ]
+}
