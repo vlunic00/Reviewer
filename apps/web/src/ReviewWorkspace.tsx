@@ -45,9 +45,11 @@ export function ReviewWorkspace({
   const [attempt, setAttempt] = useState<ReviewAttempt>();
   const [error, setError] = useState<string>();
   const [retry, setRetry] = useState(0);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
     const controller = new AbortController();
     setError(undefined);
+    setLoading(true);
     fetchJson(`/api/attempts/${encodeURIComponent(id)}`, {
       signal: controller.signal,
     })
@@ -57,6 +59,9 @@ export function ReviewWorkspace({
           setError(
             'This review could not be loaded. Your browser draft has been kept.',
           );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
   }, [id, retry]);
@@ -64,10 +69,10 @@ export function ReviewWorkspace({
     (run) => run.status === 'pending' || run.status === 'running',
   );
   useEffect(() => {
-    if (!active) return;
+    if (!active || loading) return;
     const timer = window.setTimeout(() => setRetry((value) => value + 1), 1200);
     return () => window.clearTimeout(timer);
-  }, [active, retry]);
+  }, [active, loading, retry]);
   return attempt ? (
     attempt.state === 'submitted' && attempt.results ? (
       <>

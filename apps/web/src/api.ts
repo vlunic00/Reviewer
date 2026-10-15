@@ -12,7 +12,12 @@ export async function fetchJson(
   options: RequestInit = {},
 ): Promise<unknown> {
   const response = await fetch(path, options);
-  const data: unknown = await response.json();
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch (error) {
+    if (response.ok) throw error;
+  }
   if (!response.ok) {
     const message =
       data &&

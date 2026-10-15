@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Request } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import type { AnswerKey } from '../../packages/shared/src/index.js';
 
@@ -35,6 +35,42 @@ async function note(page: Page, body: string, line = 9) {
 }
 const finish = (page: Page) =>
   page.getByRole('button', { name: 'Finish review', exact: true }).click();
+
+test('slow feedback refreshes finish without overlapping polls or cancelling the response', async ({
+  page,
+}) => {
+  await page.clock.install();
+  const attempt = await open(page);
+  await note(page, 'both: Counting exhausts rows and errors must propagate.');
+  let release!: () => void;
+  let arrived!: () => void;
+  const gate = new Promise<void>((done) => {
+    release = done;
+  });
+  const started = new Promise<void>((done) => {
+    arrived = done;
+  });
+  let first!: Request;
+  let polls = 0;
+  await page.route(`**/api/attempts/${attempt.id}`, async (route) => {
+    polls++;
+    first ??= route.request();
+    const response = await route.fetch();
+    arrived();
+    await gate;
+    await route.fulfill({ response });
+  });
+  await finish(page);
+  await page.clock.fastForward(1300);
+  await started;
+  await page.clock.fastForward(6000);
+  release();
+  expect(await first.response()).not.toBeNull();
+  await expect(
+    page.getByText('2 found · 0 missed', { exact: true }).first(),
+  ).toBeVisible();
+  expect(polls).toBe(1);
+});
 
 test('an empty offline review shows every complete lesson, old-side code, completion and saved history', async ({
   page,
