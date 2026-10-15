@@ -1,31 +1,33 @@
 import { test, expect } from '@playwright/test';
+import { resolve } from 'node:path';
+import { loadCases } from '../../apps/server/src/cases.js';
+import { languages, difficulties } from '../../packages/shared/src/index.js';
 
 test('all language/difficulty combinations work and survive a reload', async ({
   page,
 }) => {
   await page.goto('/');
-  const expected: Record<string, string> = {
-    'TypeScript/Easy': 'Simplify pagination totals',
-    'Python/Medium': 'Stream the row refresh',
-    'C++/Easy': 'Preallocate display labels',
-    'Rust/Hard': 'Relax the publication flag',
-  };
-  for (const language of ['TypeScript', 'Python', 'C++', 'Rust']) {
-    await page.getByRole('radio', { name: language, exact: true }).check();
-    for (const difficulty of ['Easy', 'Medium', 'Hard']) {
-      await page.getByRole('radio', { name: difficulty, exact: true }).check();
-      const title = expected[`${language}/${difficulty}`];
-      if (title) {
-        await expect(page.getByRole('article')).toHaveCount(1);
+  const cases = [...(await loadCases(resolve('data/cases'))).values()];
+  for (const language of languages) {
+    await page
+      .getByRole('radio', { name: language.label, exact: true })
+      .check();
+    for (const difficulty of difficulties) {
+      await page
+        .getByRole('radio', { name: difficulty.label, exact: true })
+        .check();
+      const matching = cases.filter(
+        ({ exercise }) =>
+          exercise.language === language.id &&
+          exercise.difficulty === difficulty.id,
+      );
+      await expect(page.getByRole('article')).toHaveCount(matching.length);
+      for (const { exercise } of matching)
         await expect(
-          page.getByRole('article').getByRole('heading', { name: title }),
+          page
+            .getByRole('article')
+            .getByRole('heading', { name: exercise.title, exact: true }),
         ).toBeVisible();
-      } else {
-        await expect(
-          page.getByRole('heading', { name: 'No exercises here yet' }),
-        ).toBeVisible();
-        await expect(page.getByRole('article')).toHaveCount(0);
-      }
     }
   }
   await page.reload();
@@ -38,6 +40,17 @@ test('all language/difficulty combinations work and survive a reload', async ({
   await expect(
     page.getByRole('heading', { name: 'Relax the publication flag' }),
   ).toBeVisible();
+});
+
+test('a library with no matching exercises still has a useful empty state', async ({
+  page,
+}) => {
+  await page.route('**/api/cases?**', (route) => route.fulfill({ json: [] }));
+  await page.goto('/');
+  await expect(
+    page.getByRole('heading', { name: 'No exercises here yet', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('article')).toHaveCount(0);
 });
 
 test('preview shows public context and files, closes with Escape, and uses local assets', async ({

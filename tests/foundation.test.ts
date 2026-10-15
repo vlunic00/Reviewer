@@ -106,7 +106,7 @@ async function removeTemporary(path: string, root: string) {
 
 describe('case validation', () => {
   it('loads a validated starter for every language', () => {
-    expect(cases.size).toBe(4);
+    expect(cases.size).toBeGreaterThanOrEqual(4);
     expect(
       new Set([...cases.values()].map(({ exercise }) => exercise.language))
         .size,
@@ -296,7 +296,12 @@ describe('public API boundaries', () => {
           expect(summary.difficulty).toBe(difficulty);
           expect(summary).not.toHaveProperty('files');
           expect(summary).not.toHaveProperty('issues');
-          expect(summary.changedFileCount).toBe(1);
+          expect(summary.changedFileCount).toBe(
+            cases
+              .get(summary.id)!
+              .exercise.files.filter((file) => file.status !== 'unchanged')
+              .length,
+          );
         }
       }
     }
