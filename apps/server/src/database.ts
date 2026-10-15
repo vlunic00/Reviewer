@@ -29,7 +29,7 @@ export function openDatabase(path: string): DatabaseSync {
         PRAGMA user_version = 1;
         COMMIT;
       `);
-    } else if (version !== 1 && version !== 2) {
+    } else if (version !== 1 && version !== 2 && version !== 3) {
       throw new Error(
         'This progress database requires a newer application version.',
       );
@@ -53,6 +53,39 @@ export function openDatabase(path: string): DatabaseSync {
         COMMIT;
       `);
     }
+    if (version === 0 || version === 1 || version === 2) {
+      database.exec(`
+        BEGIN;
+        CREATE TABLE assessment_runs (
+          id TEXT PRIMARY KEY,
+          attempt_id TEXT NOT NULL REFERENCES attempts(id) ON DELETE CASCADE,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'succeeded', 'failed')),
+          mode TEXT NOT NULL CHECK (mode IN ('AI-assisted', 'Self-review')),
+          model TEXT, digest TEXT,
+          prompt_version TEXT NOT NULL, assessment_version TEXT NOT NULL,
+          created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT,
+          summary TEXT, error TEXT
+        );
+        CREATE UNIQUE INDEX one_active_assessment ON assessment_runs(attempt_id)
+          WHERE status IN ('pending', 'running');
+        CREATE TABLE comment_assessments (
+          run_id TEXT NOT NULL REFERENCES assessment_runs(id) ON DELETE CASCADE,
+          comment_id TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          findings TEXT NOT NULL,
+          PRIMARY KEY (run_id, comment_id)
+        );
+        PRAGMA user_version = 3;
+        COMMIT;
+      `);
+    }
+    database
+      .prepare(
+        `UPDATE assessment_runs SET status = 'failed', completed_at = ?,
+      error = 'AI feedback was interrupted by a server restart. Choose Retry AI feedback.'
+      WHERE status IN ('pending', 'running')`,
+      )
+      .run(new Date().toISOString());
     return database;
   } catch (error) {
     database.close();

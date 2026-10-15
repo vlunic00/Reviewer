@@ -610,7 +610,7 @@ describe('review drafts', () => {
     const upgraded = openDatabase(path);
     try {
       expect(upgraded.prepare('PRAGMA user_version').get()?.user_version).toBe(
-        2,
+        3,
       );
       expect(getAttempt(upgraded, id).exercise.revision).toBe(1);
       expect(
