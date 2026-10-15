@@ -1,6 +1,6 @@
 # Code Review Trainer
 
-A free, local app for learning code-review reasoning. Phases 1–3 are implemented: language/difficulty library, a GitHub-style diff workspace, persistent drafts, optional local AI feedback, and complete worked reference lessons.
+A free, local app for learning code-review reasoning. Phases 1–4 are implemented: a complete initial exercise library, a GitHub-style diff workspace, persistent drafts, optional local AI feedback, and complete worked reference lessons.
 
 Library cards offer **Start review**, **Continue review**, **Read lessons** after submission, and **Retry exercise**. Review history reopens earlier snapshots even if a case has been removed. Answer keys and worked lessons stay private during a draft review; there are no numeric grades.
 
@@ -52,7 +52,9 @@ npm.cmd exec playwright install chromium
 npm.cmd run test:e2e
 ```
 
-Case validation and unit/API tests need no installed AI or internet connection. Browser tests start their own development server on ports **3199 / 5199**, an in-memory database, and a test-only Ollama protocol server on **11535**. They cannot write to your progress or call your configured model. The 36 unit/API tests and 19 browser tests cover filtering, private-key isolation, old/new/context ranges, complete versions, edits, recovery, submission, distinct issue counts, multi-finding comments, invalid AI output, retries/history, snapshot preservation, offline lessons, keyboard controls, and narrow layouts. Screenshots are written to the gitignored `test-results` directory.
+Case validation and unit/API tests need no installed AI or internet connection. Browser tests start their own development server on ports **3199 / 5199**, an in-memory database, and a test-only Ollama protocol server on **11535**. They cannot write to your progress or call your configured model. The 38 unit/API tests and 21 browser tests cover all 12 combinations, private-key isolation, old/new/context ranges, complete versions, edits, recovery, submission, distinct issue counts, multi-finding comments, invalid AI output, retries/history, snapshot preservation, offline lessons, keyboard controls, and narrow layouts. They also open every exercise and verify its complete lessons. Screenshots are written to the gitignored `test-results` directory.
+
+For explicit authoring-time checks of trusted sample code, run `npm.cmd run check:examples`. This uses the installed TypeScript compiler, Python 3.11+, C++17 compiler, and Rust toolchain; missing tools are clearly reported as skipped. Use a Visual Studio developer shell for `cl` on Windows. The Phase 4 run checked all 36 before/after/corrected source versions and 24 behavior-fixture runs. See [the authoring guide](CASE_AUTHORING.md#validation-and-examples) for setup and the limits of testing intentional undefined behavior and concurrency failures. This command is separate from the app and ordinary tests; review code is never executed at runtime.
 
 ## Review a commit
 
@@ -73,16 +75,24 @@ Drafts support up to 500 comments, each up to 8,000 characters, with a 5 MB requ
 
 Submitted comments are immutable. Repeated submit requests return the same submission, and repeated feedback requests share an active run. If a submission response is lost or returns a server error, editing pauses while **Finish review** safely retries. A backend restart marks interrupted feedback failed with a retry action; it preserves the submitted comments, prior results, and lessons. **Retry exercise** starts another draft and keeps earlier reviews in history.
 
-## Starter exercises
+## Exercise library
 
 | Language | Difficulty | Exercise |
 | --- | --- | --- |
 | TypeScript | Easy | Simplify pagination totals |
+| TypeScript | Medium | Batch account notifications |
+| TypeScript | Hard | Share cached catalog requests |
+| Python | Easy | Reuse report label defaults |
 | Python | Medium | Stream the row refresh |
+| Python | Hard | Simplify concurrent snapshot exports |
 | C++ | Easy | Preallocate display labels |
+| C++ | Medium | Return catalog labels without copying |
+| C++ | Hard | Simplify work queue shutdown |
+| Rust | Easy | Normalize optional retry budgets |
+| Rust | Medium | Collect receipt imports through iterators |
 | Rust | Hard | Relax the publication flag |
 
-All **12 language/difficulty combinations** are selectable. Combinations without a case show an empty state. Complete 12-case coverage is scheduled for Phase 4. Language and difficulty are stored in URL query parameters and survive reloads and closing an overview.
+All **12 language/difficulty combinations** now contain one exercise, with **22 complete reference lessons** in total. The examples teach language-specific patterns such as promise ownership, iterator exhaustion, task supervision, C++ lifetimes, container access, condition-variable invariants, Rust Option/Result handling, and atomic publication. Language and difficulty are stored in URL query parameters and survive reloads and closing an overview. The empty state remains available if a future local catalog has no matching case.
 
 ## Add a case
 
@@ -93,7 +103,7 @@ Add a folder under `data/cases/<language>/<difficulty>/<id>/` with:
 
 Use the starter files and [implementation guide](CODE_REVIEW_TRAINER_CODEX_GUIDE.md#4-exercises-and-their-answer-keys) as examples. IDs are lowercase letters/digits/hyphens; paths are relative, use forward slashes, and cannot traverse directories. Added files have only `after`, deleted files only `before`, modified files have different versions, and unchanged context files have identical versions. Empty strings represent empty files. Anchors use 1-based version line numbers; a final newline does not create an extra commentable row. Keys and cases with invalid fields, duplicate IDs/paths, missing pairs, or invalid issue locations fail validation and server startup. Case directories cannot contain symlinks.
 
-Run `npm.cmd run validate:cases` and inspect every claimed issue, failure example, and corrected snippet. Structural validation checks required fields and correction paths, but cannot establish explanation quality. The four starter cases are now revision 2 and have complete authored lessons. Bump both public and private revisions together when changing a case. Exercise source code is displayed as data and is never executed by the application. Language-specific compilation checks are authoring-time checks; validators do not require those compilers.
+Follow [CASE_AUTHORING.md](CASE_AUTHORING.md) for the offline Codex workflow, per-language verification, and issue-by-issue author review record. Run `npm.cmd run validate:cases` and inspect every claimed issue, failure example, and corrected snippet. Structural validation checks required fields and correction paths, but cannot establish explanation quality. The four original starter cases remain unchanged at revision 2. Bump both public and private revisions together when changing a case. Exercise source code is displayed as data and is never executed by the application. Language-specific compilation checks are authoring-time checks; validators do not require those compilers.
 
 ## Local data and boundaries
 

@@ -258,7 +258,7 @@ Example (using the same abridged public exercise as above):
 - Do not send `answer-key.json` from any public browsing or exercise API endpoint before review submission.
 - After submission, show the reference answers only in the results flow. This is not hardened anti-cheat security; it is sensible separation for a single-user trainer.
 
-**Starter-case status:** Phase 2 extended the strict shared answer-key schema and CLI validation and expanded **all four starter answer keys together**. All five reference issues now have the required worked-lesson fields, with matching exercise/key revisions incremented to 2. Future changes must update matching revisions and preserve existing attempt snapshots. Structural validation does not replace author review of explanation accuracy or corrected-code consistency.
+**Starter-case status:** Phase 2 extended the strict shared answer-key schema and CLI validation and expanded **all four starter answer keys together**. Their five reference issues have the required worked-lesson fields, with matching exercise/key revisions incremented to 2. Phase 4 added eight cases, bringing the catalog to 12 exercises and 22 worked lessons across every language/difficulty combination. The original starters remain unchanged. Future changes must update matching revisions and preserve existing attempt snapshots. Structural validation does not replace author review of explanation accuracy or corrected-code consistency; see [the authoring and review record](CASE_AUTHORING.md).
 
 ### 4.4 Difficulty guidelines
 
@@ -303,6 +303,8 @@ Codex (or another capable model) should produce cases **before the app is used**
 7. Save and commit the mock commit **and all its mistakes/explanations** together so lessons work fully offline. When an existing lesson changes, update the matching exercise/key revisions and leave historical snapshots intact.
 
 Provide a CLI validator such as `npm run validate:cases` that runs without AI or network calls.
+
+The implemented workflow is documented in [CASE_AUTHORING.md](CASE_AUTHORING.md). `npm run check:examples` explicitly checks trusted before/after/corrected sample projects with installed language tools and executable behavior fixtures; it is separate from runtime and structural validation. Missing compilers are reported as skipped, and unsafe/weak-memory failures require a reviewed argument rather than a promised ordinary reproduction.
 
 ---
 
@@ -532,7 +534,7 @@ Provide straightforward commands for install, development, case validation, test
 
 **Done when:** the user can select any of the four languages and any difficulty and see the correctly filtered library or a helpful empty state.
 
-**Status:** implemented with four starter cases, public exercise previews, and all 12 filter combinations. Phase 2 added the worked-lesson validation/content and persistent draft review workspace; Phase 3 added submission and learning feedback. See `README.md` for run/check commands. Complete 12-case coverage remains in Phase 4.
+**Status:** implemented with public exercise previews and all 12 filter combinations. Phase 2 added the worked-lesson validation/content and persistent draft review workspace; Phase 3 added submission and learning feedback. Phase 4 completed the initial 12-case catalog. See `README.md` for run/check commands.
 
 ### Phase 2 — GitHub-style code review
 
@@ -566,6 +568,8 @@ Provide straightforward commands for install, development, case validation, test
 - Validate issue locations and worked-lesson fields; manually check explanation accuracy, concrete failure examples, corrected-code consistency, and prevention guidance for every issue.
 
 **Done when:** TypeScript, Python, C++, and Rust each have Easy, Medium, and Hard reviewable cases, with a complete authored worked lesson for every planted mistake.
+
+**Status:** implemented with 12 exercises and 22 complete worked lessons. Eight new cases cover the missing combinations while preserving the four original starters. The catalog includes language-specific mistakes, removed safeguards, and unchanged context. [CASE_AUTHORING.md](CASE_AUTHORING.md) documents Codex authoring, validation, and the manual review of all reference mechanisms/corrections. All 36 before/after/corrected versions passed installed-tool source checks; the eight added cases passed 24 behavior-fixture runs. Deterministic coverage/anchor tests and browser checks exercise every combination and its full stored lessons. Intentional undefined behavior and weak-memory observations are explained without claiming guaranteed ordinary reproduction; model calibration remains follow-up work.
 
 ### Phase 5 — Testing and polish
 
