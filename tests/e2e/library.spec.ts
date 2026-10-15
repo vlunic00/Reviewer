@@ -53,6 +53,70 @@ test('a library with no matching exercises still has a useful empty state', asyn
   await expect(page.getByRole('article')).toHaveCount(0);
 });
 
+test('every seeded combination opens commentable code and complete stored lessons', async ({
+  page,
+}) => {
+  for (const { exercise, answerKey } of (
+    await loadCases(resolve('data/cases'))
+  ).values()) {
+    const created = await page.request.post('/api/attempts', {
+      data: { exerciseId: exercise.id },
+    });
+    expect(created.status()).toBe(201);
+    const attempt = await created.json();
+    await page.goto(
+      `/?language=${exercise.language}&difficulty=${exercise.difficulty}&attempt=${attempt.id}`,
+    );
+    await expect(
+      page.getByRole('heading', { name: exercise.title, exact: true }),
+    ).toBeVisible();
+    const anchor = answerKey.issues[0].locations[0];
+    await page
+      .getByRole('button', { name: anchor.filePath, exact: false })
+      .click();
+    await page.getByLabel('File version').selectOption(anchor.side);
+    await page
+      .getByRole('button', {
+        name: `Comment on ${anchor.side} line ${anchor.startLine}`,
+        exact: true,
+      })
+      .click();
+    await page
+      .getByLabel('Review comment', { exact: true })
+      .fill('Draft reasoning can be attached to this source location.');
+    await page
+      .getByRole('button', { name: 'Cancel note', exact: true })
+      .click();
+    await page
+      .getByRole('button', { name: 'Finish review', exact: true })
+      .click();
+    await expect(
+      page
+        .getByText(`0 found · ${answerKey.issues.length} missed`, {
+          exact: true,
+        })
+        .first(),
+    ).toBeVisible();
+    for (const lesson of answerKey.issues) {
+      const article = page.getByRole('article', {
+        name: lesson.title,
+        exact: true,
+      });
+      for (const field of [
+        lesson.explanation,
+        lesson.failureExample,
+        lesson.whyItMatters,
+        lesson.suggestedFix,
+        lesson.prevention,
+      ])
+        await expect(article).toContainText(field);
+      await expect(article.locator('pre code')).toHaveText(
+        lesson.correctedCode.map((correction) => correction.code),
+      );
+    }
+  }
+});
+
 test('preview shows public context and files, closes with Escape, and uses local assets', async ({
   page,
 }) => {

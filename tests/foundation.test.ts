@@ -10,6 +10,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   answerKeySchema,
   exerciseSchema,
+  languages,
+  difficulties,
   sourceLines,
   validateAnchor,
   validateAnswerKey,
@@ -105,12 +107,23 @@ async function removeTemporary(path: string, root: string) {
 }
 
 describe('case validation', () => {
-  it('loads a validated starter for every language', () => {
-    expect(cases.size).toBeGreaterThanOrEqual(4);
+  it('loads a validated exercise for every language and difficulty', () => {
+    expect(cases.size).toBeGreaterThanOrEqual(12);
     expect(
       new Set([...cases.values()].map(({ exercise }) => exercise.language))
         .size,
     ).toBe(4);
+    for (const language of languages)
+      for (const difficulty of difficulties) {
+        expect(
+          [...cases.values()].some(
+            ({ exercise }) =>
+              exercise.language === language.id &&
+              exercise.difficulty === difficulty.id,
+          ),
+          `${language.label}/${difficulty.label} needs an exercise`,
+        ).toBe(true);
+      }
     for (const loaded of cases.values()) {
       expect(loaded.checksum).toMatch(/^[a-f0-9]{64}$/);
       expect(loaded.answerKey.issues.length).toBeGreaterThan(0);
