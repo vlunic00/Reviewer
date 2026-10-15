@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "rust-easy-001",
+  "revision": 1,
+  "language": "rust",
+  "difficulty": "easy",
+  "title": "Normalize optional retry budgets",
+  "description": "A configuration helper filters an optional retry count before applying the default.",
+  "commitMessage": "Treat nonpositive retry values as unspecified configuration.",
+  "reviewContext": "None means use three retries. Some(0) explicitly disables retries, so the initial attempt is the only attempt. Other configured values are prevalidated in 1..=10. maximum_attempts includes the initial attempt. No network operations are performed in these helpers.",
+  "files": [
+    {
+      "path": "src/config.rs",
+      "status": "modified",
+      "before": "pub fn retry_budget(configured: Option<u32>) -> u32 {\n    configured.unwrap_or(3)\n}\n",
+      "after": "pub fn retry_budget(configured: Option<u32>) -> u32 {\n    configured.filter(|value| *value > 0).unwrap_or(3)\n}\n"
+    },
+    {
+      "path": "src/client.rs",
+      "status": "unchanged",
+      "before": "use crate::config::retry_budget;\n\npub fn maximum_attempts(configured: Option<u32>) -> u32 {\n    1 + retry_budget(configured)\n}\n",
+      "after": "use crate::config::retry_budget;\n\npub fn maximum_attempts(configured: Option<u32>) -> u32 {\n    1 + retry_budget(configured)\n}\n"
+    }
+  ],
+  "tags": [
+    "Option",
+    "configuration",
+    "zero versus absence"
+  ]
+}

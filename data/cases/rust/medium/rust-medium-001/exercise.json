@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "rust-medium-001",
+  "revision": 1,
+  "language": "rust",
+  "difficulty": "medium",
+  "title": "Collect receipt imports through iterators",
+  "description": "An import pipeline changes how paired inputs and parse failures reach the ledger.",
+  "commitMessage": "Collect ready receipts in a compact iterator pipeline.",
+  "reviewContext": "The two slices describe one batch: each receipt ID must have exactly one amount. IDs are already valid and unique. Amounts must parse as positive u64 cents. Mismatched lengths or any invalid amount must return Err and leave the ledger unchanged. Empty paired slices are a valid empty import. Only after the complete batch validates may save_import append its receipts.",
+  "files": [
+    {
+      "path": "src/receipts.rs",
+      "status": "modified",
+      "before": "use crate::model::{parse_receipt, Receipt};\n\npub fn import_receipts(ids: &[u64], amounts: &[&str]) -> Result<Vec<Receipt>, String> {\n    if ids.len() != amounts.len() {\n        return Err(\"receipt and amount counts differ\".into());\n    }\n    ids.iter()\n        .zip(amounts)\n        .map(|(id, raw)| parse_receipt(*id, raw))\n        .collect()\n}\n",
+      "after": "use crate::model::{parse_receipt, Receipt};\n\npub fn import_receipts(ids: &[u64], amounts: &[&str]) -> Result<Vec<Receipt>, String> {\n    let receipts = ids.iter()\n        .zip(amounts)\n        .filter_map(|(id, raw)| parse_receipt(*id, raw).ok())\n        .collect();\n    Ok(receipts)\n}\n"
+    },
+    {
+      "path": "src/model.rs",
+      "status": "unchanged",
+      "before": "#[derive(Debug, Clone, PartialEq, Eq)]\npub struct Receipt {\n    pub id: u64,\n    pub cents: u64,\n}\n\npub fn parse_receipt(id: u64, raw: &str) -> Result<Receipt, String> {\n    let cents = raw.parse::<u64>().map_err(|_| format!(\"invalid amount for {id}\"))?;\n    if cents == 0 {\n        return Err(format!(\"zero amount for {id}\"));\n    }\n    Ok(Receipt { id, cents })\n}\n",
+      "after": "#[derive(Debug, Clone, PartialEq, Eq)]\npub struct Receipt {\n    pub id: u64,\n    pub cents: u64,\n}\n\npub fn parse_receipt(id: u64, raw: &str) -> Result<Receipt, String> {\n    let cents = raw.parse::<u64>().map_err(|_| format!(\"invalid amount for {id}\"))?;\n    if cents == 0 {\n        return Err(format!(\"zero amount for {id}\"));\n    }\n    Ok(Receipt { id, cents })\n}\n"
+    },
+    {
+      "path": "src/service.rs",
+      "status": "unchanged",
+      "before": "use crate::model::Receipt;\nuse crate::receipts::import_receipts;\n\npub fn save_import(ledger: &mut Vec<Receipt>, ids: &[u64], amounts: &[&str]) -> Result<usize, String> {\n    let receipts = import_receipts(ids, amounts)?;\n    let count = receipts.len();\n    ledger.extend(receipts);\n    Ok(count)\n}\n",
+      "after": "use crate::model::Receipt;\nuse crate::receipts::import_receipts;\n\npub fn save_import(ledger: &mut Vec<Receipt>, ids: &[u64], amounts: &[&str]) -> Result<usize, String> {\n    let receipts = import_receipts(ids, amounts)?;\n    let count = receipts.len();\n    ledger.extend(receipts);\n    Ok(count)\n}\n"
+    }
+  ],
+  "tags": [
+    "Result",
+    "iterator adapters",
+    "batch atomicity"
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "exerciseId": "rust-easy-001",
+  "revision": 1,
+  "issues": [
+    {
+      "id": "issue-001",
+      "title": "Filtering discards an explicit zero retry budget",
+      "category": "optional value semantics",
+      "severity": "medium",
+      "locations": [
+        {
+          "filePath": "src/config.rs",
+          "side": "new",
+          "startLine": 2,
+          "endLine": 2
+        },
+        {
+          "filePath": "src/client.rs",
+          "side": "new",
+          "startLine": 4,
+          "endLine": 4
+        }
+      ],
+      "summary": "Some(0) is changed to None, causing a no-retry setting to use the default of three retries.",
+      "explanation": "Option distinguishes an absent value from a present value, including zero. filter keeps a Some value only when its predicate is true. For Some(0), the new predicate is false, so filter returns None and unwrap_or selects 3.\n\nThe caller adds one for the initial attempt. A user who configured zero retries therefore gets up to four total attempts rather than one. None and positive values still behave as expected, which can make a default-path-only test pass. Zero is valid according to the supplied contract, not an invalid value to normalize away.",
+      "failureExample": "Call maximum_attempts(Some(0)). Expected: 1, representing only the original attempt. Actual: the filter discards zero, retry_budget returns 3, and maximum_attempts returns 4. For comparison, None legitimately returns 4 and Some(2) returns 3.",
+      "whyItMatters": "Operations configured to avoid retries can be repeated, increasing load or repeating an action the caller intended to attempt only once.",
+      "suggestedFix": "Apply unwrap_or directly to configured. It substitutes the default only for None and preserves every Some value, including zero. Keep validation of the permitted positive range at the stated input boundary rather than treating a valid disabling value as absence.",
+      "correctedCode": [
+        {
+          "filePath": "src/config.rs",
+          "code": "pub fn retry_budget(configured: Option<u32>) -> u32 {\n    configured.unwrap_or(3)\n}\n"
+        }
+      ],
+      "prevention": "For optional numeric configuration, list the meanings of absent, zero and positive values before simplifying it. Table-test None, Some(0), Some(1) and the upper supported value through the caller that computes attempts, not just through the raw option helper.",
+      "acceptableExplanations": [
+        "Option::filter turns Some(0) into None.",
+        "Zero disables retries but the code replaces it with the default.",
+        "Use unwrap_or without filtering away zero."
+      ],
+      "keyConcepts": [
+        "Option::filter",
+        "sentinel values",
+        "configuration contracts"
+      ],
+      "commonConfusions": [
+        "Some(0) is present configuration, not a missing value.",
+        "The unsigned type prevents negative counts, not semantic mistakes about zero."
+      ]
+    }
+  ]
+}

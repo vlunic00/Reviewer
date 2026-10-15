@@ -1,0 +1,116 @@
+{
+  "exerciseId": "rust-medium-001",
+  "revision": 1,
+  "issues": [
+    {
+      "id": "issue-001",
+      "title": "zip silently accepts mismatched batch lengths",
+      "category": "input pairing",
+      "severity": "medium",
+      "locations": [
+        {
+          "filePath": "src/receipts.rs",
+          "side": "old",
+          "startLine": 4,
+          "endLine": 4
+        },
+        {
+          "filePath": "src/receipts.rs",
+          "side": "new",
+          "startLine": 5,
+          "endLine": 5
+        },
+        {
+          "filePath": "src/service.rs",
+          "side": "new",
+          "startLine": 5,
+          "endLine": 5
+        }
+      ],
+      "summary": "Removing the length guard lets zip stop at the shorter slice and silently ignore unmatched inputs.",
+      "explanation": "Iterator::zip produces pairs only while both input iterators can yield an element. It does not report that one input had remaining elements. The old length check established that every ID had exactly one corresponding amount before constructing the iterator. The new code removes that precondition.\n\nAn unmatched ID or amount is dropped from the produced vector, and Ok tells save_import that the batch validated. The caller then appends an incomplete batch to the ledger. This failure occurs even when every paired amount parses correctly, so restoring Result error propagation alone is insufficient.",
+      "failureExample": "Import IDs [10, 11] with amounts [\"100\"]. Expected: Err and no ledger change because ID 11 has no amount. Actual: zip yields only (10, \"100\"), and save_import appends that one receipt and reports Ok(1). Reversing the mismatch, one ID and two amounts, silently ignores the extra amount too.",
+      "whyItMatters": "Malformed batches are accepted partially, losing receipts or amounts without an error.",
+      "suggestedFix": "Restore the equal-length guard before zipping. Then each element is paired and a mismatch returns Err before ledger mutation. Keep an explicit empty-batch test because two empty slices satisfy the pairing contract.",
+      "correctedCode": [
+        {
+          "filePath": "src/receipts.rs",
+          "code": "use crate::model::{parse_receipt, Receipt};\n\npub fn import_receipts(ids: &[u64], amounts: &[&str]) -> Result<Vec<Receipt>, String> {\n    if ids.len() != amounts.len() {\n        return Err(\"receipt and amount counts differ\".into());\n    }\n    ids.iter()\n        .zip(amounts)\n        .map(|(id, raw)| parse_receipt(*id, raw))\n        .collect()\n}\n"
+        }
+      ],
+      "prevention": "When pairing parallel collections, determine whether truncation is intended or a contract violation. Test both mismatch directions, equal nonempty inputs and equal empty inputs through save_import. Assert the ledger stays unchanged when the lengths differ.",
+      "acceptableExplanations": [
+        "zip stops at the shorter iterator after the length check was removed.",
+        "Unpaired IDs or amounts are silently dropped.",
+        "Validate equal lengths before zipping the batch."
+      ],
+      "keyConcepts": [
+        "Iterator::zip",
+        "cardinality invariants",
+        "validation before mutation"
+      ],
+      "commonConfusions": [
+        "zip does not return an error for unequal lengths.",
+        "A correct parse of the paired prefix does not validate the entire batch."
+      ]
+    },
+    {
+      "id": "issue-002",
+      "title": "Converting Result to Option drops invalid receipts",
+      "category": "error propagation",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "src/receipts.rs",
+          "side": "new",
+          "startLine": 6,
+          "endLine": 6
+        },
+        {
+          "filePath": "src/receipts.rs",
+          "side": "new",
+          "startLine": 8,
+          "endLine": 8
+        },
+        {
+          "filePath": "src/model.rs",
+          "side": "new",
+          "startLine": 8,
+          "endLine": 8
+        },
+        {
+          "filePath": "src/service.rs",
+          "side": "new",
+          "startLine": 7,
+          "endLine": 7
+        }
+      ],
+      "summary": "Result::ok erases parse errors and filter_map skips them, so a partly invalid batch is reported as successful.",
+      "explanation": "parse_receipt returns Result so it can explain an invalid or zero amount. The old map preserved those Results, and collect inferred Result<Vec<Receipt>, String>, stopping on the first Err. save_import propagated that error before extending the ledger.\n\nThe new .ok() converts Err into None and loses its error string. filter_map removes that None from the sequence. collect now builds a vector only of successes, and the explicit Ok wraps even an empty or partial result as success. The ? in save_import cannot restore errors that the producer erased. Rust's types permit this pipeline but do not make its policy match the all-or-nothing batch contract.",
+      "failureExample": "Start with a ledger containing an earlier receipt. Import IDs [10, 11] with amounts [\"oops\", \"200\"]. Expected: Err for ID 10 and the original ledger unchanged. Actual: ID 10 becomes None and is skipped, ID 11 is appended, and save_import returns Ok(1). A zero amount follows the same error-dropping path. All-invalid input can even return Ok(0).",
+      "whyItMatters": "Invalid financial input disappears silently while the valid subset is persisted, preventing callers from correcting or retrying the complete batch safely.",
+      "suggestedFix": "Map to parse_receipt without .ok() and collect directly into the function's Result<Vec<Receipt>, String>. That preserves the first parse error and returns no vector to the caller on failure, so save_import never reaches ledger.extend. The integrated correction also restores the equal-length guard.",
+      "correctedCode": [
+        {
+          "filePath": "src/receipts.rs",
+          "code": "use crate::model::{parse_receipt, Receipt};\n\npub fn import_receipts(ids: &[u64], amounts: &[&str]) -> Result<Vec<Receipt>, String> {\n    if ids.len() != amounts.len() {\n        return Err(\"receipt and amount counts differ\".into());\n    }\n    ids.iter()\n        .zip(amounts)\n        .map(|(id, raw)| parse_receipt(*id, raw))\n        .collect()\n}\n"
+        }
+      ],
+      "prevention": "Review adapters such as ok, flatten and filter_map for intentional error loss. Test a bad amount before and after a valid one, a zero amount, and an all-invalid batch; each must return Err without changing the ledger. Keep a successful multi-receipt batch test to confirm valid receipts preserve input order.",
+      "acceptableExplanations": [
+        "filter_map with Result::ok hides parse errors.",
+        "The batch succeeds with only the valid subset.",
+        "Collect Results instead of dropping Err values."
+      ],
+      "keyConcepts": [
+        "Result::ok",
+        "collect over Results",
+        "all-or-nothing validation"
+      ],
+      "commonConfusions": [
+        "The caller's ? propagates only errors it actually receives.",
+        "A type-correct iterator pipeline can still implement the wrong failure policy."
+      ]
+    }
+  ]
+}
