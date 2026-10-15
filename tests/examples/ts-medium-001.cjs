@@ -34,8 +34,18 @@ const after = process.argv[3] === 'after';
   await task;
   await new Promise(setImmediate);
   await notifyAccounts([], mailer);
-  // Avoid executing the after-version's discarded rejection; its promise ownership is reviewed in the lesson.
-  if (!after)
+  if (after) {
+    // Observe the known discarded rejection without invoking Node's default fatal policy.
+    const discarded = new Promise((done) =>
+      process.once('unhandledRejection', done),
+    );
+    await notifyAccounts([accounts[0]], {
+      send: async () => {
+        throw new Error('delivery failed');
+      },
+    });
+    assert.equal((await discarded).message, 'delivery failed');
+  } else
     await assert.rejects(
       notifyAccounts([accounts[0]], {
         send: async () => {

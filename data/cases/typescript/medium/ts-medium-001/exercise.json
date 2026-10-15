@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "id": "ts-medium-001",
-  "revision": 1,
+  "revision": 2,
   "language": "typescript",
   "difficulty": "medium",
   "title": "Batch account notifications",
   "description": "A notification refactor introduces per-account subjects and changes how sends are scheduled.",
   "commitMessage": "Generate personalized subjects while batching monthly email sends.",
-  "reviewContext": "Only accounts with allowEmail=true may receive email. notifyAccounts must remain pending until all successful sends finish and must reject if any send fails. Parallel sending is allowed; cancellation of sibling sends after a failure is not required. Accounts and addresses have already been validated. No notification retries are performed inside this function.",
+  "reviewContext": "Only accounts with allowEmail=true may receive email. A successful notifyAccounts call may resolve only after every eligible send finishes. It must reject if any send fails; waiting for or cancelling sibling sends after a failure is not required. Parallel sending is allowed. Accounts and addresses have already been validated. No notification retries are performed inside this function.",
   "files": [
     {
       "path": "src/notify.ts",
