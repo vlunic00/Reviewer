@@ -176,7 +176,9 @@ export function FileDiff({
           className="other-version-note"
           onClick={() => setMode(selection.side)}
         >
-          Continue your note in the{' '}
+          {readOnly
+            ? 'View the highlighted lines in the'
+            : 'Continue your note in the'}{' '}
           {selection.side === 'old' ? 'original' : 'updated'} file
         </button>
       )}
@@ -186,7 +188,12 @@ export function FileDiff({
         </button>
       )}
       {hunks.length ? (
-        <div className="diff-scroll">
+        <div
+          className="diff-scroll"
+          tabIndex={0}
+          role="region"
+          aria-label={`Scrollable code for ${file.path}`}
+        >
           <Diff
             hunks={hunks}
             diffType={
@@ -214,6 +221,7 @@ export function FileDiff({
               return (
                 <button
                   className="line-button"
+                  id={`review-line-${side}-${line}`}
                   disabled={readOnly}
                   aria-label={`Comment on ${side} line ${line}`}
                   aria-pressed={

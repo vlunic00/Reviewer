@@ -114,17 +114,20 @@ export function LearningResults({
     </button>
   );
 
-  if (anchor) {
-    const file = attempt.exercise.files.find(
-      (file) => file.path === anchor.filePath,
-    )!;
-    return (
-      <main className="review-workspace" id="review" tabIndex={-1}>
+  const file =
+    anchor &&
+    attempt.exercise.files.find((file) => file.path === anchor.filePath);
+  const codeView =
+    anchor && file ? (
+      <section aria-label="Saved review code">
         <button
           className="secondary-button"
           onClick={() => {
             setAnchor(undefined);
-            requestAnimationFrame(() => opener.current?.focus());
+            requestAnimationFrame(() => {
+              if (opener.current?.isConnected) opener.current.focus();
+              else document.getElementById('review')?.focus();
+            });
           }}
         >
           ← Back to lessons
@@ -150,9 +153,8 @@ export function LearningResults({
             onDelete={() => {}}
           />
         </div>
-      </main>
-    );
-  }
+      </section>
+    ) : null;
 
   const groups = selected?.summary
     ? [
@@ -170,10 +172,17 @@ export function LearningResults({
   function runLabel(run: AssessmentRun) {
     return `${time(run.createdAt)} · ${run.model ?? run.mode} · ${run.id.slice(0, 8)}`;
   }
-  return (
+  return [
+    codeView && (
+      <main key="code" className="review-workspace" id="review" tabIndex={-1}>
+        {codeView}
+      </main>
+    ),
     <main
+      key="lessons"
       className="review-workspace learning-results"
-      id="review"
+      id={anchor ? undefined : 'review'}
+      hidden={Boolean(anchor)}
       tabIndex={-1}
     >
       <button className="secondary-button" onClick={onBack}>
@@ -183,7 +192,7 @@ export function LearningResults({
         <span className="eyebrow">REVIEW COMPLETE · KEEP LEARNING</span>
         <h1>{attempt.exercise.title}</h1>
         {selected?.summary ? (
-          <p className="issue-summary">
+          <p className="issue-summary" role="status" aria-live="polite">
             <strong>
               {selected.summary.foundCount} found ·{' '}
               {selected.summary.missedCount} missed
@@ -195,7 +204,7 @@ export function LearningResults({
               : ' Counts use AI matching; the authored lessons explain the reference mistakes.'}
           </p>
         ) : (
-          <p className="issue-summary">
+          <p className="issue-summary" role="status" aria-live="polite">
             <strong>Automatic found/missed counts unavailable.</strong> Your
             review is saved. All authored lessons are ready for self-review.
           </p>
@@ -247,7 +256,7 @@ export function LearningResults({
           </button>
         </div>
         {setup && (
-          <div className="ai-setup">
+          <div className="ai-setup" role="status">
             <p>
               <strong>
                 {setup.available
@@ -362,7 +371,10 @@ export function LearningResults({
                       <figcaption>
                         {correction.filePath} · Corrected code
                       </figcaption>
-                      <pre tabIndex={0}>
+                      <pre
+                        tabIndex={0}
+                        aria-label={`Corrected code: ${correction.filePath}`}
+                      >
                         <code>{correction.code}</code>
                       </pre>
                     </figure>
@@ -476,6 +488,6 @@ export function LearningResults({
         Reference lessons were written with the exercise. AI feedback
         supplements them; it can make mistakes.
       </footer>
-    </main>
-  );
+    </main>,
+  ];
 }

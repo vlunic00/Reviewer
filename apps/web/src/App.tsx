@@ -162,6 +162,13 @@ export function App() {
   );
   const [startingId, setStartingId] = useState<string>();
   const [startError, setStartError] = useState<string>();
+  const previousAttempt = useRef(attemptId);
+  useEffect(() => {
+    document.title = `${attemptId ? 'Review' : 'Exercise library'} · Code Review Trainer`;
+    if (!attemptId && previousAttempt.current)
+      document.getElementById('library')?.focus();
+    previousAttempt.current = attemptId;
+  }, [attemptId]);
   const languageLabel = languages.find(
     (language) => language.id === filters.language,
   )!.label;

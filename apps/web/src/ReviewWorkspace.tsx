@@ -73,6 +73,11 @@ export function ReviewWorkspace({
     const timer = window.setTimeout(() => setRetry((value) => value + 1), 1200);
     return () => window.clearTimeout(timer);
   }, [active, loading, retry]);
+  useEffect(() => {
+    if (!attempt) return;
+    document.title = `${attempt.exercise.title} · ${attempt.state === 'draft' ? 'Review' : 'Lessons'} · Code Review Trainer`;
+    document.getElementById('review')?.focus();
+  }, [id, attempt?.state]);
   return attempt ? (
     attempt.state === 'submitted' && attempt.results ? (
       <>
@@ -103,7 +108,12 @@ export function ReviewWorkspace({
       />
     )
   ) : (
-    <main className="review-workspace">
+    <main
+      className="review-workspace"
+      id="review"
+      tabIndex={-1}
+      aria-busy={loading}
+    >
       <button className="secondary-button" onClick={onBack}>
         Back to library
       </button>
@@ -235,6 +245,18 @@ function ReviewDraft({
     setEditorState(next);
     setEditorError(undefined);
   }
+  function closeEditor() {
+    const previous = currentEditor.current;
+    setEditor(null);
+    if (previous)
+      requestAnimationFrame(() =>
+        document
+          .getElementById(
+            `review-line-${previous.anchor.side}-${previous.pivotLine}`,
+          )
+          ?.focus(),
+      );
+  }
   function save(): Promise<boolean> {
     if (inFlight.current) return inFlight.current;
     if (readOnly) return Promise.resolve(true);
@@ -358,7 +380,7 @@ function ReviewDraft({
           )
         : [...comments, comment],
     );
-    setEditor(null);
+    closeEditor();
   }
   async function back() {
     if (await save()) {
@@ -451,6 +473,8 @@ function ReviewDraft({
             <input
               type="number"
               min="1"
+              aria-invalid={Boolean(editorError)}
+              aria-describedby={editorError ? 'review-range-error' : undefined}
               value={selection.startLine}
               onChange={(event) =>
                 setEditor({
@@ -468,6 +492,8 @@ function ReviewDraft({
             <input
               type="number"
               min="1"
+              aria-invalid={Boolean(editorError)}
+              aria-describedby={editorError ? 'review-range-error' : undefined}
               value={selection.endLine}
               onChange={(event) =>
                 setEditor({
@@ -482,13 +508,18 @@ function ReviewDraft({
         <textarea
           id="review-comment-body"
           maxLength={8000}
+          required
           value={editor.body}
           onChange={(event) =>
             setEditor({ ...editor, body: event.target.value })
           }
           placeholder="What might go wrong, and why?"
         />
-        {editorError && <p role="alert">{editorError}</p>}
+        {editorError && (
+          <p role="alert" id="review-range-error">
+            {editorError}
+          </p>
+        )}
         <div className="editor-actions">
           <button className="primary-button" disabled={!editor.body.trim()}>
             {editor.id ? 'Save comment' : 'Add comment'}
@@ -496,7 +527,7 @@ function ReviewDraft({
           <button
             type="button"
             className="secondary-button"
-            onClick={() => setEditor(null)}
+            onClick={closeEditor}
           >
             Cancel note
           </button>
@@ -653,11 +684,21 @@ function ReviewDraft({
                 pivotLine: comment.anchor.endLine,
               });
             }}
-            onDelete={(commentId) =>
+            onDelete={(commentId) => {
+              const deleted = comments.find(
+                (comment) => comment.id === commentId,
+              )!;
               setComments(
                 comments.filter((comment) => comment.id !== commentId),
-              )
-            }
+              );
+              requestAnimationFrame(() =>
+                (
+                  document.getElementById(
+                    `review-line-${deleted.anchor.side}-${deleted.anchor.endLine}`,
+                  ) ?? document.querySelector<HTMLElement>('.diff-scroll')
+                )?.focus(),
+              );
+            }}
           />
         </div>
       </div>

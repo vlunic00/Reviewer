@@ -38,6 +38,13 @@ label:has(input:focus-visible) {
   outline: 3px solid #46977e;
   outline-offset: 4px;
 }
+select:focus-visible,
+textarea:focus-visible,
+pre:focus-visible,
+.diff-scroll:focus-visible {
+  outline: 3px solid #46977e;
+  outline-offset: 2px;
+}
 button:disabled {
   cursor: wait;
 }
