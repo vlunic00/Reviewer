@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "cpp-medium-001",
+  "revision": 1,
+  "language": "cpp",
+  "difficulty": "medium",
+  "title": "Return catalog labels without copying",
+  "description": "A catalog lookup refactor changes its label return type and membership test.",
+  "commitMessage": "Use string_view for display labels and simplify membership lookup.",
+  "reviewContext": "C++17. add inserts a previously absent ID and returns true, without overwriting an existing ID. Supplied names are nonempty. contains must answer membership without changing the catalog. label must return an independently owned prefixed string that remains usable after the call and after catalog changes. Unknown labels raise out_of_range. Calls are single-threaded in this exercise.",
+  "files": [
+    {
+      "path": "src/catalog.hpp",
+      "status": "modified",
+      "before": "#pragma once\n#include <map>\n#include <string>\n\nclass Catalog {\npublic:\n    bool add(int id, std::string name);\n    bool contains(int id);\n    std::string label(int id) const;\nprivate:\n    std::map<int, std::string> items_;\n};\n",
+      "after": "#pragma once\n#include <map>\n#include <string>\n#include <string_view>\n\nclass Catalog {\npublic:\n    bool add(int id, std::string name);\n    bool contains(int id);\n    std::string_view label(int id) const;\nprivate:\n    std::map<int, std::string> items_;\n};\n"
+    },
+    {
+      "path": "src/catalog.cpp",
+      "status": "modified",
+      "before": "#include \"catalog.hpp\"\n#include <stdexcept>\n#include <utility>\n\nbool Catalog::add(int id, std::string name) {\n    return items_.emplace(id, std::move(name)).second;\n}\n\nbool Catalog::contains(int id) {\n    return items_.find(id) != items_.end();\n}\n\nstd::string Catalog::label(int id) const {\n    const auto found = items_.find(id);\n    if (found == items_.end()) throw std::out_of_range(\"unknown product\");\n    std::string formatted = \"Product: \" + found->second;\n    return formatted;\n}\n",
+      "after": "#include \"catalog.hpp\"\n#include <stdexcept>\n#include <utility>\n\nbool Catalog::add(int id, std::string name) {\n    return items_.emplace(id, std::move(name)).second;\n}\n\nbool Catalog::contains(int id) {\n    return !items_[id].empty();\n}\n\nstd::string_view Catalog::label(int id) const {\n    const auto found = items_.find(id);\n    if (found == items_.end()) throw std::out_of_range(\"unknown product\");\n    std::string formatted = \"Product: \" + found->second;\n    return formatted;\n}\n"
+    },
+    {
+      "path": "src/view.cpp",
+      "status": "unchanged",
+      "before": "#include \"catalog.hpp\"\n\nstd::string displayTitle(const Catalog& catalog, int id) {\n    return std::string(catalog.label(id));\n}\n",
+      "after": "#include \"catalog.hpp\"\n\nstd::string displayTitle(const Catalog& catalog, int id) {\n    return std::string(catalog.label(id));\n}\n"
+    }
+  ],
+  "tags": [
+    "lifetimes",
+    "string_view",
+    "map lookup"
+  ]
+}

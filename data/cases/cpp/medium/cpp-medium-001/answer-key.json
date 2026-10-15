@@ -1,0 +1,118 @@
+{
+  "exerciseId": "cpp-medium-001",
+  "revision": 1,
+  "issues": [
+    {
+      "id": "issue-001",
+      "title": "The returned string_view points into a destroyed local string",
+      "category": "object lifetime",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "src/catalog.hpp",
+          "side": "new",
+          "startLine": 10,
+          "endLine": 10
+        },
+        {
+          "filePath": "src/catalog.cpp",
+          "side": "new",
+          "startLine": 16,
+          "endLine": 16
+        },
+        {
+          "filePath": "src/catalog.cpp",
+          "side": "new",
+          "startLine": 17,
+          "endLine": 17
+        },
+        {
+          "filePath": "src/view.cpp",
+          "side": "new",
+          "startLine": 4,
+          "endLine": 4
+        }
+      ],
+      "summary": "The view borrows formatted, whose storage dies before displayTitle can copy it.",
+      "explanation": "std::string_view describes characters owned elsewhere; it does not keep a std::string alive or take ownership of its buffer. Catalog::label builds formatted as a local string containing the prefix and product name. Converting formatted to string_view stores a pointer and length into that local string.\n\nThe local string is destroyed when label returns, leaving the view dangling. displayTitle immediately constructs an owning string, but it must read through the already-dangling view to do so. Small-string optimization or an apparently intact buffer does not extend the object lifetime. This compiled API change violates the independently owned result contract.",
+      "failureExample": "Add product 7 named Notebook and call displayTitle(catalog, 7). Expected: an owned string equal to Product: Notebook, safe to retain. Actual: label returns a view into its destroyed formatted string, and constructing the display string accesses invalid storage. It may print correctly, show corrupted text, or fail; undefined behavior has no guaranteed output. Do not use an ordinary successful run as proof of safety.",
+      "whyItMatters": "Reading labels can access invalid storage and produce corrupted output or memory-safety failures.",
+      "suggestedFix": "Return std::string in both the declaration and definition, preserving ownership of the newly formatted text. Returning the local string as an owning value supports move/copy elision while keeping the characters alive. Merely binding the returned view to a longer-lived variable, or copying it later in displayTitle, cannot revive the destroyed owner.",
+      "correctedCode": [
+        {
+          "filePath": "src/catalog.hpp",
+          "code": "#pragma once\n#include <map>\n#include <string>\n\nclass Catalog {\npublic:\n    bool add(int id, std::string name);\n    bool contains(int id);\n    std::string label(int id) const;\nprivate:\n    std::map<int, std::string> items_;\n};\n"
+        },
+        {
+          "filePath": "src/catalog.cpp",
+          "code": "#include \"catalog.hpp\"\n#include <stdexcept>\n#include <utility>\n\nbool Catalog::add(int id, std::string name) {\n    return items_.emplace(id, std::move(name)).second;\n}\n\nbool Catalog::contains(int id) {\n    return items_.find(id) != items_.end();\n}\n\nstd::string Catalog::label(int id) const {\n    const auto found = items_.find(id);\n    if (found == items_.end()) throw std::out_of_range(\"unknown product\");\n    std::string formatted = \"Product: \" + found->second;\n    return formatted;\n}\n"
+        }
+      ],
+      "prevention": "For every view, pointer or reference returned from a function, identify the owner and prove it outlives all uses. Check declarations and callers when return types change. Compile the before/after/corrected API together; use lifetime analysis or sanitizers where supported, but retain the lifetime argument because a dangling view need not fail visibly in every run.",
+      "acceptableExplanations": [
+        "string_view refers to a local string that is destroyed on return.",
+        "The new return type removes ownership and leaves a dangling view.",
+        "Return an owning std::string for the formatted label."
+      ],
+      "keyConcepts": [
+        "non-owning views",
+        "local object lifetime",
+        "ownership at API boundaries"
+      ],
+      "commonConfusions": [
+        "string_view does not extend the lifetime of its source string.",
+        "Copying in the caller is too late if the view already dangles."
+      ]
+    },
+    {
+      "id": "issue-002",
+      "title": "The membership test inserts missing products",
+      "category": "container semantics",
+      "severity": "medium",
+      "locations": [
+        {
+          "filePath": "src/catalog.cpp",
+          "side": "new",
+          "startLine": 10,
+          "endLine": 10
+        },
+        {
+          "filePath": "src/catalog.cpp",
+          "side": "new",
+          "startLine": 6,
+          "endLine": 6
+        }
+      ],
+      "summary": "map::operator[] creates an empty entry on a miss, preventing a later add from inserting that ID.",
+      "explanation": "std::map::operator[] is an inserting access operation. If id is absent, items_[id] first inserts an entry with a value-initialized std::string, then empty checks that new string. contains still returns false, which makes a superficial return-value test pass, but the catalog has changed.\n\nCatalog::add uses emplace and does not overwrite existing IDs. After contains inserts a placeholder, a later add for that formerly missing ID fails and leaves the empty name in place. This is separate from the dangling label view and can be reproduced without calling label at all.",
+      "failureExample": "With an empty catalog, call contains(42), then add(42, \"Notebook\"). Expected: contains returns false without changes and add returns true. Actual: contains inserts 42 with an empty string, returns false, and add returns false because 42 already exists. The intended name is never installed.",
+      "whyItMatters": "An apparently read-only membership check reserves IDs with empty entries and causes valid future inserts to fail.",
+      "suggestedFix": "Use find(id) != end() to test membership in C++17. It neither inserts nor interprets mapped values as membership. Keep emplace semantics for genuine adds. The integrated corrected files also restore the owning label API.",
+      "correctedCode": [
+        {
+          "filePath": "src/catalog.hpp",
+          "code": "#pragma once\n#include <map>\n#include <string>\n\nclass Catalog {\npublic:\n    bool add(int id, std::string name);\n    bool contains(int id);\n    std::string label(int id) const;\nprivate:\n    std::map<int, std::string> items_;\n};\n"
+        },
+        {
+          "filePath": "src/catalog.cpp",
+          "code": "#include \"catalog.hpp\"\n#include <stdexcept>\n#include <utility>\n\nbool Catalog::add(int id, std::string name) {\n    return items_.emplace(id, std::move(name)).second;\n}\n\nbool Catalog::contains(int id) {\n    return items_.find(id) != items_.end();\n}\n\nstd::string Catalog::label(int id) const {\n    const auto found = items_.find(id);\n    if (found == items_.end()) throw std::out_of_range(\"unknown product\");\n    std::string formatted = \"Product: \" + found->second;\n    return formatted;\n}\n"
+        }
+      ],
+      "prevention": "Distinguish lookup-only container APIs from lookup-or-insert APIs. After a miss, test subsequent insertion and contents, not just the immediate boolean result. Review whether a method advertised as an observation changes size or invalidates domain invariants.",
+      "acceptableExplanations": [
+        "operator[] inserts on a missing key.",
+        "contains mutates the map and makes a later emplace fail.",
+        "Use find for a non-inserting membership test."
+      ],
+      "keyConcepts": [
+        "map::operator[]",
+        "value initialization",
+        "observational side effects"
+      ],
+      "commonConfusions": [
+        "Returning false does not prove that the lookup left the map unchanged.",
+        "Checking whether a mapped value is empty is not a substitute for checking whether its key exists."
+      ]
+    }
+  ]
+}

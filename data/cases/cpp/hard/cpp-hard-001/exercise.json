@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "cpp-hard-001",
+  "revision": 1,
+  "language": "cpp",
+  "difficulty": "hard",
+  "title": "Simplify work queue shutdown",
+  "description": "A queue refactor changes waking, callback execution, and the shutdown boundary.",
+  "commitMessage": "Mark runOne results nodiscard and streamline worker synchronization.",
+  "reviewContext": "C++17. push accepts nonempty callbacks only while the queue is open. close rejects future pushes but all previously accepted jobs must still execute exactly once before runOne returns false. Several producers and workers may share a queue. A callback may push another job while the queue remains open; callbacks must execute without the internal queue mutex held. Callbacks in this exercise do not throw. Owners close the queue and join all workers before destroying it.",
+  "files": [
+    {
+      "path": "src/queue.hpp",
+      "status": "modified",
+      "before": "#pragma once\n#include <condition_variable>\n#include <functional>\n#include <mutex>\n#include <queue>\n\nclass WorkQueue {\npublic:\n    using Job = std::function<void()>;\n    void push(Job job);\n    bool runOne();\n    void close();\nprivate:\n    std::mutex mutex_;\n    std::condition_variable ready_;\n    std::queue<Job> jobs_;\n    bool closed_ = false;\n};\n",
+      "after": "#pragma once\n#include <condition_variable>\n#include <functional>\n#include <mutex>\n#include <queue>\n\nclass WorkQueue {\npublic:\n    using Job = std::function<void()>;\n    void push(Job job);\n    [[nodiscard]] bool runOne();\n    void close();\nprivate:\n    std::mutex mutex_;\n    std::condition_variable ready_;\n    std::queue<Job> jobs_;\n    bool closed_ = false;\n};\n"
+    },
+    {
+      "path": "src/queue.cpp",
+      "status": "modified",
+      "before": "#include \"queue.hpp\"\n#include <stdexcept>\n#include <utility>\n\nvoid WorkQueue::push(Job job) {\n    {\n        std::lock_guard<std::mutex> lock(mutex_);\n        if (closed_) throw std::runtime_error(\"queue closed\");\n        jobs_.push(std::move(job));\n    }\n    ready_.notify_one();\n}\n\nbool WorkQueue::runOne() {\n    std::unique_lock<std::mutex> lock(mutex_);\n    ready_.wait(lock, [this] { return closed_ || !jobs_.empty(); });\n    if (jobs_.empty()) return false;\n    auto job = std::move(jobs_.front());\n    jobs_.pop();\n    lock.unlock();\n    job();\n    return true;\n}\n\nvoid WorkQueue::close() {\n    {\n        std::lock_guard<std::mutex> lock(mutex_);\n        closed_ = true;\n    }\n    ready_.notify_all();\n}\n",
+      "after": "#include \"queue.hpp\"\n#include <stdexcept>\n#include <utility>\n\nvoid WorkQueue::push(Job job) {\n    {\n        std::lock_guard<std::mutex> lock(mutex_);\n        if (closed_) throw std::runtime_error(\"queue closed\");\n        jobs_.push(std::move(job));\n    }\n    ready_.notify_one();\n}\n\nbool WorkQueue::runOne() {\n    std::unique_lock<std::mutex> lock(mutex_);\n    if (jobs_.empty() && !closed_) ready_.wait(lock);\n    if (closed_) return false;\n    auto job = std::move(jobs_.front());\n    jobs_.pop();\n    job();\n    return true;\n}\n\nvoid WorkQueue::close() {\n    {\n        std::lock_guard<std::mutex> lock(mutex_);\n        closed_ = true;\n    }\n    ready_.notify_all();\n}\n"
+    },
+    {
+      "path": "src/worker.cpp",
+      "status": "unchanged",
+      "before": "#include \"queue.hpp\"\n\nvoid workerLoop(WorkQueue& queue) {\n    while (queue.runOne()) {\n        // Each successful call has executed one accepted job.\n    }\n}\n",
+      "after": "#include \"queue.hpp\"\n\nvoid workerLoop(WorkQueue& queue) {\n    while (queue.runOne()) {\n        // Each successful call has executed one accepted job.\n    }\n}\n"
+    }
+  ],
+  "tags": [
+    "condition variables",
+    "reentrancy",
+    "shutdown invariants"
+  ]
+}

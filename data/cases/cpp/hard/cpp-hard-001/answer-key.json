@@ -1,0 +1,162 @@
+{
+  "exerciseId": "cpp-hard-001",
+  "revision": 1,
+  "issues": [
+    {
+      "id": "issue-001",
+      "title": "A wakeup no longer rechecks whether work exists",
+      "category": "condition variable synchronization",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "src/queue.cpp",
+          "side": "old",
+          "startLine": 16,
+          "endLine": 16
+        },
+        {
+          "filePath": "src/queue.cpp",
+          "side": "new",
+          "startLine": 16,
+          "endLine": 16
+        },
+        {
+          "filePath": "src/queue.cpp",
+          "side": "new",
+          "startLine": 18,
+          "endLine": 18
+        }
+      ],
+      "summary": "The one-time if allows an empty queue to reach front after a spurious or already-consumed wakeup.",
+      "explanation": "A condition-variable notification is not a promise that the protected condition is true when a worker resumes. wait can wake spuriously, and another worker can consume the available job before this worker reacquires the mutex. The predicate overload previously rechecked closed_ || !jobs_.empty() while holding the lock and kept waiting when neither was true.\n\nThe replacement tests emptiness only before waiting. After a wake, it checks closed_ but never rechecks jobs_.empty(). If the queue is still open and empty, it calls front and pop without an element. The mutex prevents simultaneous access to queue storage but does not make an empty queue nonempty.",
+      "failureExample": "A worker waits on an open empty queue and wakes spuriously without any push. Expected: it observes that the queue is still empty and waits again. Actual: closed_ is false, so it proceeds to front on an empty queue, violating the container precondition. Another permitted schedule has two workers wake for one job; one takes it before the other reacquires the lock. Do not promise either schedule in an ordinary test run.",
+      "whyItMatters": "Workers can access an empty queue, leading to undefined behavior or failure under otherwise valid wakeup schedules.",
+      "suggestedFix": "Restore the predicate wait, or use a loop that rechecks the protected condition after every wake. After waiting, return false only if no jobs remain. The predicate must be read under the same mutex as queue changes; notifications alone do not transfer ownership of a job.",
+      "correctedCode": [
+        {
+          "filePath": "src/queue.cpp",
+          "code": "#include \"queue.hpp\"\n#include <stdexcept>\n#include <utility>\n\nvoid WorkQueue::push(Job job) {\n    {\n        std::lock_guard<std::mutex> lock(mutex_);\n        if (closed_) throw std::runtime_error(\"queue closed\");\n        jobs_.push(std::move(job));\n    }\n    ready_.notify_one();\n}\n\nbool WorkQueue::runOne() {\n    std::unique_lock<std::mutex> lock(mutex_);\n    ready_.wait(lock, [this] { return closed_ || !jobs_.empty(); });\n    if (jobs_.empty()) return false;\n    auto job = std::move(jobs_.front());\n    jobs_.pop();\n    lock.unlock();\n    job();\n    return true;\n}\n\nvoid WorkQueue::close() {\n    {\n        std::lock_guard<std::mutex> lock(mutex_);\n        closed_ = true;\n    }\n    ready_.notify_all();\n}\n"
+        }
+      ],
+      "prevention": "Review condition-variable code as a loop over an invariant, not as a sequence of notifications. Consider spurious wakeups and competing consumers explicitly. Use a controllable wait abstraction or suitable concurrency tooling for forced schedules; ordinary stress tests cannot establish that every permitted interleaving is safe.",
+      "acceptableExplanations": [
+        "wait needs a predicate or while loop.",
+        "A wakeup can occur with no available jobs.",
+        "The new if can reach front on an empty queue."
+      ],
+      "keyConcepts": [
+        "spurious wakeups",
+        "predicate waits",
+        "container preconditions"
+      ],
+      "commonConfusions": [
+        "Holding the mutex protects access but does not guarantee available work.",
+        "A notify does not reserve a queued job for a particular worker."
+      ]
+    },
+    {
+      "id": "issue-002",
+      "title": "Closing the queue discards accepted work",
+      "category": "shutdown semantics",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "src/queue.cpp",
+          "side": "old",
+          "startLine": 17,
+          "endLine": 17
+        },
+        {
+          "filePath": "src/queue.cpp",
+          "side": "new",
+          "startLine": 17,
+          "endLine": 17
+        },
+        {
+          "filePath": "src/worker.cpp",
+          "side": "new",
+          "startLine": 4,
+          "endLine": 4
+        }
+      ],
+      "summary": "runOne exits on closed_ even when previously accepted jobs are still queued.",
+      "explanation": "closed_ describes whether new pushes are allowed; it does not say whether queued work has been drained. The old implementation wakes on either shutdown or available work and returns false only when the queue is empty. This allows a closed queue to continue executing jobs accepted earlier.\n\nThe refactor returns false as soon as closed_ is true. workerLoop interprets false as completion and stops, leaving jobs_ untouched. The regression can happen with one worker and no concurrency at all. Fixing the wait predicate alone does not restore the shutdown contract.",
+      "failureExample": "Push two callbacks into an open queue, then close it before starting workerLoop. Expected: both callbacks execute once, then runOne returns false. Actual: the first runOne sees closed_ and returns false immediately, so neither accepted callback runs.",
+      "whyItMatters": "A normal shutdown can silently lose already accepted work.",
+      "suggestedFix": "After the predicate wait, test jobs_.empty() to decide whether the worker should exit. A closed nonempty queue must continue draining. Keep push's closed check so shutdown still prevents new jobs, and keep notifying all waiters so an empty closed queue can terminate.",
+      "correctedCode": [
+        {
+          "filePath": "src/queue.cpp",
+          "code": "#include \"queue.hpp\"\n#include <stdexcept>\n#include <utility>\n\nvoid WorkQueue::push(Job job) {\n    {\n        std::lock_guard<std::mutex> lock(mutex_);\n        if (closed_) throw std::runtime_error(\"queue closed\");\n        jobs_.push(std::move(job));\n    }\n    ready_.notify_one();\n}\n\nbool WorkQueue::runOne() {\n    std::unique_lock<std::mutex> lock(mutex_);\n    ready_.wait(lock, [this] { return closed_ || !jobs_.empty(); });\n    if (jobs_.empty()) return false;\n    auto job = std::move(jobs_.front());\n    jobs_.pop();\n    lock.unlock();\n    job();\n    return true;\n}\n\nvoid WorkQueue::close() {\n    {\n        std::lock_guard<std::mutex> lock(mutex_);\n        closed_ = true;\n    }\n    ready_.notify_all();\n}\n"
+        }
+      ],
+      "prevention": "Write down separate invariants for accepting work and finishing work. Test close on an empty queue, close with queued callbacks, rejection of later pushes, and repeated runOne calls until the queue is drained. Verify callback counts, not only that worker threads exit.",
+      "acceptableExplanations": [
+        "closed does not mean the queue is empty.",
+        "The worker exits before draining jobs accepted before close.",
+        "Return false only after shutdown and exhaustion of queued work."
+      ],
+      "keyConcepts": [
+        "acceptance versus completion",
+        "draining shutdown",
+        "state invariants"
+      ],
+      "commonConfusions": [
+        "Rejecting new work and discarding existing work are different shutdown policies.",
+        "A prompt worker exit is not proof that accepted jobs completed."
+      ]
+    },
+    {
+      "id": "issue-003",
+      "title": "Callbacks now execute while the queue mutex is held",
+      "category": "reentrancy and locking",
+      "severity": "high",
+      "locations": [
+        {
+          "filePath": "src/queue.cpp",
+          "side": "old",
+          "startLine": 20,
+          "endLine": 20
+        },
+        {
+          "filePath": "src/queue.cpp",
+          "side": "new",
+          "startLine": 20,
+          "endLine": 20
+        },
+        {
+          "filePath": "src/queue.cpp",
+          "side": "new",
+          "startLine": 15,
+          "endLine": 15
+        }
+      ],
+      "summary": "A supported re-entrant push attempts to lock the nonrecursive mutex already owned by the same thread.",
+      "explanation": "unique_lock retains ownership of mutex_ until it is explicitly unlocked or destroyed. The old runOne moved a callback out of the queue, popped it while protected, then unlocked before invoking external code. The new version invokes job while the unique_lock still owns mutex_.\n\nA valid callback can call push to schedule follow-up work while the queue is open. push then attempts to lock the same nonrecursive std::mutex on the owning thread. This violates the mutex locking precondition and can produce self-deadlock; portable code cannot depend on a particular observable failure. Even callbacks that do not re-enter unnecessarily block other producers and consumers for their full execution time.",
+      "failureExample": "On an open queue, push a callback that pushes a follow-up callback on that same queue. Expected: the first runOne invokes it outside the lock, the follow-up is accepted, and a second runOne can execute it. Actual: the first callback reaches push while runOne owns mutex_ and attempts a forbidden recursive lock. A common result is a self-deadlock before runOne can release its lock, but the violated precondition does not guarantee that single outcome. This is direct synchronous re-entry, not a timing assumption.",
+      "whyItMatters": "Supported callbacks can violate mutex preconditions or deadlock the worker, preventing shutdown or further queue progress.",
+      "suggestedFix": "Move and pop the job under the mutex, then unlock before calling it. The local std::function owns the callback after it is removed, so queue storage does not need to remain locked during invocation. Keep synchronization around all shared queue and closed-state accesses; changing to a recursive mutex would hide the ownership mistake and still serialize callback execution.",
+      "correctedCode": [
+        {
+          "filePath": "src/queue.cpp",
+          "code": "#include \"queue.hpp\"\n#include <stdexcept>\n#include <utility>\n\nvoid WorkQueue::push(Job job) {\n    {\n        std::lock_guard<std::mutex> lock(mutex_);\n        if (closed_) throw std::runtime_error(\"queue closed\");\n        jobs_.push(std::move(job));\n    }\n    ready_.notify_one();\n}\n\nbool WorkQueue::runOne() {\n    std::unique_lock<std::mutex> lock(mutex_);\n    ready_.wait(lock, [this] { return closed_ || !jobs_.empty(); });\n    if (jobs_.empty()) return false;\n    auto job = std::move(jobs_.front());\n    jobs_.pop();\n    lock.unlock();\n    job();\n    return true;\n}\n\nvoid WorkQueue::close() {\n    {\n        std::lock_guard<std::mutex> lock(mutex_);\n        closed_ = true;\n    }\n    ready_.notify_all();\n}\n"
+        }
+      ],
+      "prevention": "Treat callbacks as external code that may block or re-enter. Trace lock ownership across every callback invocation and keep critical sections limited to shared-state transitions. Test a re-entrant push on the corrected version with a process-level timeout so a regression cannot hang the authoring suite indefinitely.",
+      "acceptableExplanations": [
+        "job runs before the unique_lock releases mutex_.",
+        "A callback that calls push deadlocks on the same mutex.",
+        "Unlock after popping and before invoking user code."
+      ],
+      "keyConcepts": [
+        "RAII lock lifetime",
+        "re-entrant callbacks",
+        "critical-section boundaries"
+      ],
+      "commonConfusions": [
+        "Moving the callback out of the queue does not release the mutex.",
+        "A recursive mutex is not the needed fix for executing external work under a queue lock."
+      ]
+    }
+  ]
+}

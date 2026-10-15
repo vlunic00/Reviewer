@@ -23,6 +23,7 @@ function run(command: string, args: string[], cwd: string) {
     throw new Error(
       `${command} failed in ${cwd}: ${result.error?.message ?? result.stdout + result.stderr}`,
     );
+  for (const warning of (result.stdout + result.stderr).split(/\r?\n/).filter((line) => /\bwarning\b/i.test(line))) console.log(warning);
 }
 const python = available('python')
   ? 'python'
